@@ -1,0 +1,164 @@
+canonical:
+  - bd
+  - sd
+  - hh
+  - cp
+  - oh
+  - rim
+  - cr
+  - rd
+  - tom
+  - bass
+  - piano
+  - strings
+  - synth
+  - pluck
+  - pad
+  - guitar
+  - perc
+  - organ
+  - flute
+  - brass
+  - choir
+  - violin
+  - cello
+  - harp
+  - saxophone
+  - trumpet
+  - trombone
+  - clarinet
+  - oboe
+  - vibraphone
+  - marimba
+  - kalimba
+  - bell
+  - accordion
+  - harmonica
+  - banjo
+  - nylon-guitar
+  - shaker
+  - tambourine
+  - cowbell
+  - conga
+  - sine
+  - triangle
+  - sawtooth
+  - square
+aliases:
+  drums: [bd, sd, hh, cp]
+  kick: bd
+  kick-drum: bd
+  snare: sd
+  snare-drum: sd
+  hihat: hh
+  hi-hat: hh
+  closed-hat: hh
+  open-hat: oh
+  clap: cp
+  handclap: cp
+  crash: cr
+  ride: rd
+  percussion: perc
+  high-tom: tom
+  mid-tom: tom
+  low-tom: tom
+  keys: piano
+  keyboard: piano
+  electric-piano: piano
+  string: strings
+  string-section: strings
+  bassline: bass
+  synth-bass: bass
+  vocals: choir
+  vocal: choir
+  sax: saxophone
+  trumpet-section: brass
+  ukulele: nylon-guitar
+  gm_drawbar_organ: organ
+  gm_church_organ: organ
+  gm_lead_2_sawtooth: synth
+  gm_pad_warm: pad
+  gm_piano: piano
+  gm_alto_sax: saxophone
+  gm_tenor_sax: saxophone
+sounds:
+  bd: bd
+  sd: sd
+  hh: hh
+  cp: cp
+  oh: oh
+  rim: rim
+  cr: cr
+  rd: rd
+  tom: mt
+  bass: gm_electric_bass_finger
+  piano: piano
+  strings: gm_string_ensemble_1
+  synth: gm_lead_2_sawtooth
+  pluck: gm_pizzicato_strings
+  pad: gm_pad_warm
+  guitar: gm_acoustic_guitar_steel
+  perc: perc
+  organ: gm_church_organ
+  flute: gm_flute
+  brass: gm_brass_section
+  choir: gm_choir_aahs
+  violin: gm_violin
+  cello: gm_cello
+  harp: gm_orchestral_harp
+  saxophone: gm_alto_sax
+  trumpet: gm_trumpet
+  trombone: gm_trombone
+  clarinet: gm_clarinet
+  oboe: gm_oboe
+  vibraphone: gm_vibraphone
+  marimba: gm_marimba
+  kalimba: gm_kalimba
+  bell: gm_tubular_bells
+  accordion: gm_accordion
+  harmonica: gm_harmonica
+  banjo: gm_banjo
+  nylon-guitar: gm_acoustic_guitar_nylon
+  shaker: sh
+  tambourine: tb
+  cowbell: cb
+  conga: conga
+  sine: sine
+  triangle: triangle
+  sawtooth: sawtooth
+  square: square
+ensembles:
+  - [piano, strings]
+  - [bd, sd, hh]
+  - [synth, bd, bass]
+  - [piano, perc]
+  - [pluck, pad]
+  - [guitar, bass, bd]
+  - [strings, pad, piano]
+  - [synth, pluck, hh]
+  - [organ, bass, sd]
+  - [flute, strings, pad]
+  - [brass, bd, bass]
+  - [choir, pad, piano]
+  - [violin, cello, piano]
+  - [harp, flute, strings]
+  - [saxophone, piano, bass, hh]
+  - [trumpet, trombone, bass, bd]
+  - [clarinet, piano, perc]
+  - [oboe, strings, harp]
+  - [vibraphone, bass, hh]
+  - [marimba, shaker, bass]
+  - [kalimba, pad, perc]
+  - [bell, choir, strings]
+  - [accordion, guitar, perc]
+  - [harmonica, guitar, bass]
+  - [banjo, bass, tambourine]
+  - [nylon-guitar, shaker, pad]
+  - [cowbell, bd, bass, synth]
+  - [sine, triangle, pad]
+  - [sawtooth, square, bd, bass]
+  - [cello, choir, organ]
+  - [flute, clarinet, harp]
+  - [brass, saxophone, piano, sd]
+  - [bd, sd, hh, cr, tom]
+  - [conga, shaker, cowbell]

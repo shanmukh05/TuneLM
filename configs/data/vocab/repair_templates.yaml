@@ -1,0 +1,246 @@
+prompt_templates:
+  - "Fix this Strudel program while keeping its musical idea intact."
+  - "This Strudel pattern does not run. Repair it without redesigning the music."
+  - "Can you correct the broken Strudel code and preserve the original arrangement?"
+  - "Debug this Strudel loop, changing only what is needed to make it executable."
+  - "Make the smallest necessary repair to this Strudel program."
+  - "Restore this pattern to valid Strudel while retaining its tempo and instrumentation."
+  - "The syntax in this Strudel sketch is broken; fix it and keep the same composition."
+  - "Please repair this Strudel code without adding or removing musical layers."
+  - "Get this Strudel pattern running again while preserving its notes and rhythm."
+  - "Correct the error in this Strudel program and leave the musical content unchanged."
+  - "Patch this broken Strudel snippet with minimal musical changes."
+  - "Repair the program below so it executes as the intended Strudel pattern."
+  - "Find and fix the Strudel error while keeping the same groove."
+  - "Return a working version of this broken Strudel composition."
+  - "Resolve the execution problem in this Strudel code without altering its character."
+  - "Something is wrong with this Strudel pattern. Fix it conservatively."
+  - "Clean up the broken syntax here and preserve the existing musical structure."
+  - "Make this Strudel sketch playable again without rewriting the arrangement."
+  - "Diagnose and repair this pattern while retaining its tempo, sounds, and notes."
+  - "Apply a minimal fix so this Strudel composition executes correctly."
+
+skeletons:
+  - name: drum_melody
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        s("bd*{kick} ~ sd ~").gain(0.8),
+        s("hh*{hats}").gain(0.{gain:02d}),
+        note("{notes}").s("{voice}").slow({slow})
+      )
+    params:
+      kick: [1, 2, 3, 4, 5, 6]
+      hats: [2, 3, 4, 5, 6, 7, 8, 10, 12]
+      notes: ["c4 eb4 g4 bb4", "d4 f4 a4 c5", "e4 g4 b4 d5", "a3 c4 e4 g4", "g3 b3 d4 f4", "f4 a4 c5 e5", "bb3 d4 f4 a4"]
+      voice:
+        [piano, sine, triangle, sawtooth, square, gm_pizzicato_strings, gm_pad_warm,
+         gm_lead_2_sawtooth, gm_church_organ, gm_flute]
+      slow: [1, 2, 3, 4]
+
+  - name: ambient_pad
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{notes}").s("gm_pad_warm").slow({slow}).gain(0.6),
+        s("~ ~ bd ~").gain(0.5),
+        note("{bass_notes}").s("gm_electric_bass_finger").slow(2)
+      )
+    params:
+      notes: ["c4 e4 g4", "d4 f4 a4", "e4 g4 b4", "a3 c4 e4", "f4 a4 c5", "g3 d4 g4"]
+      bass_notes: ["c2 g2", "d2 a2", "e2 b2", "a1 e2", "f2 c3", "g1 d2"]
+      slow: [2, 3, 4, 5]
+
+  - name: percussive
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        s("bd sd bd ~").gain(0.85),
+        s("hh*8").gain(0.3),
+        s("cp ~ cp ~").gain(0.4),
+        note("{notes}").s("gm_pizzicato_strings").slow({slow})
+      )
+    params:
+      notes: ["c5 e5 g5", "d5 f5 a5", "e5 g5 b5", "f4 a4 c5", "g4 bb4 d5"]
+      slow: [1, 2, 3]
+
+  - name: melodic_minimal
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{notes}").s("{voice}"),
+        s("bd ~ ~ ~").gain(0.7)
+      )
+    params:
+      notes: ["c4 e4 g4 c5", "d4 f4 a4 d5", "e4 g4 b4 e5", "f4 a4 c5 f5", "g3 b3 d4 g4"]
+      voice: [piano, sine, gm_flute, gm_church_organ, gm_clarinet, gm_vibraphone]
+
+  - name: layered_synth
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        s("bd*2 ~ sd ~").gain(0.8),
+        note("{notes}").s("sawtooth").slow({slow}),
+        note("{bass_notes}").s("gm_electric_bass_finger").gain(0.7),
+        s("hh*{hats}").gain(0.25)
+      )
+    params:
+      notes: ["c4 eb4 g4", "d4 f4 a4", "f4 ab4 c5", "e4 g4 b4", "g3 bb3 d4"]
+      bass_notes: ["c2", "d2", "e2", "f2", "g2", "a1"]
+      hats: [4, 6, 8, 10, 12]
+      slow: [1, 2, 3]
+
+  - name: house_bass
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        s("bd*{kick} ~ bd ~").gain(0.9),
+        s("~ cp ~ cp").gain(0.5),
+        note("{bass_notes}").s("gm_electric_bass_finger").slow({slow}),
+        s("hh*{hats}").gain(0.3)
+      )
+    params:
+      kick: [1, 2, 3, 4]
+      hats: [4, 6, 8, 12]
+      bass_notes: ["c2 c2 eb2 g2", "d2 f2 a2 c3", "e2 g2 b2 d3", "f2 ab2 c3 eb3"]
+      slow: [1, 2]
+
+  - name: jazz_keys
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{chords}").s("piano").slow({slow}).gain(0.7),
+        note("{bass_notes}").s("gm_electric_bass_finger").slow(2),
+        s("bd ~ sd ~").gain(0.45),
+        s("hh*{hats}").gain(0.2)
+      )
+    params:
+      chords: ["c4 e4 g4 b4", "d4 f4 a4 c5", "f4 a4 c5 e5", "g3 b3 d4 f4"]
+      bass_notes: ["c2 g2", "d2 a2", "f2 c3", "g1 d2"]
+      slow: [2, 3, 4]
+      hats: [3, 4, 6]
+
+  - name: cinematic_strings
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{high_notes}").s("gm_violin").slow({slow}).gain(0.6),
+        note("{low_notes}").s("gm_cello").slow({slow}).gain(0.7),
+        note("{chords}").s("gm_string_ensemble_1").slow(4),
+        s("~ ~ bd ~").gain(0.25)
+      )
+    params:
+      high_notes: ["c5 e5 g5", "d5 f5 a5", "e5 g5 b5", "f5 a5 c6"]
+      low_notes: ["c3 g3", "d3 a3", "e3 b3", "f3 c4"]
+      chords: ["c4 e4 g4", "d4 f4 a4", "e4 g4 b4", "f4 a4 c5"]
+      slow: [2, 3, 4]
+
+  - name: guitar_groove
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{chords}").s("gm_acoustic_guitar_steel").slow({slow}).gain(0.7),
+        note("{bass_notes}").s("gm_electric_bass_finger").slow(2),
+        s("bd ~ sd ~").gain(0.75),
+        s("sh*{shaker}").gain(0.25)
+      )
+    params:
+      chords: ["c4 e4 g4", "d4 f4 a4", "e4 g4 b4", "a3 c4 e4"]
+      bass_notes: ["c2 g2", "d2 a2", "e2 b2", "a1 e2"]
+      slow: [1, 2, 3]
+      shaker: [4, 6, 8]
+
+  - name: mallet_pattern
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{melody}").s("gm_marimba").slow({slow}).gain(0.7),
+        note("{counter}").s("gm_vibraphone").slow(2).gain(0.5),
+        s("bd ~ ~ sd").gain(0.55),
+        s("sh*{shaker}").gain(0.2)
+      )
+    params:
+      melody: ["c5 e5 g5 e5", "d5 f5 a5 f5", "e5 g5 b5 g5", "a4 c5 e5 c5"]
+      counter: ["c4 g4", "d4 a4", "e4 b4", "a3 e4"]
+      slow: [1, 2, 3]
+      shaker: [4, 8, 12]
+
+  - name: choir_ambient
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{chords}").s("gm_choir_aahs").slow({slow}).gain(0.55),
+        note("{high_notes}").s("gm_flute").slow(3).gain(0.4),
+        note("{bass_notes}").s("gm_church_organ").slow(4).gain(0.45),
+        s("~ ~ bd ~").gain(0.2)
+      )
+    params:
+      chords: ["c4 e4 g4", "d4 f4 a4", "e4 g4 b4", "f4 a4 c5"]
+      high_notes: ["g5 e5", "a5 f5", "b5 g5", "c6 a5"]
+      bass_notes: ["c2 g2", "d2 a2", "e2 b2", "f2 c3"]
+      slow: [3, 4, 5]
+
+  - name: chiptune_lead
+    template: |
+      setcpm({bpm}/4)
+      stack(
+        note("{melody}").s("square").slow({slow}).gain(0.55),
+        note("{bass_notes}").s("triangle").slow(2).gain(0.65),
+        s("bd*{kick} ~ sd ~").gain(0.7),
+        s("hh*{hats}").gain(0.2)
+      )
+    params:
+      melody: ["c5 e5 g5 c6", "d5 f5 a5 d6", "e5 g5 b5 e6", "a4 c5 e5 a5"]
+      bass_notes: ["c2 c3", "d2 d3", "e2 e3", "a1 a2"]
+      slow: [1, 2]
+      kick: [1, 2, 3, 4]
+      hats: [4, 8, 12]
+
+corruptions:
+  - kind: missing_closing_parenthesis
+    description: Remove one closing parenthesis
+
+  - kind: invalid_function
+    description: Inject invalidFunction before a known call
+
+  - kind: unterminated_string
+    description: Remove closing quote from a string literal
+
+  - kind: missing_opening_parenthesis
+    description: Remove one opening parenthesis after a function name
+
+  - kind: extra_closing_bracket
+    description: Add an extra closing parenthesis
+
+  - kind: typo_in_sample
+    description: Introduce a delimiter typo in an s() sample call
+
+  - kind: broken_setcpm
+    description: Corrupt setcpm argument
+
+  - kind: missing_comma
+    description: Remove comma between stack layers
+
+  - kind: double_dot
+    description: Add extra dot in method chain
+
+  - kind: unclosed_stack
+    description: Remove final closing paren of stack
+
+  - kind: invalid_note_syntax
+    description: Break note() string syntax
+
+  - kind: wrong_gain_paren
+    description: Remove parenthesis from gain call
+
+  - kind: missing_method_dot
+    description: Remove the dot before a chained method call
+
+  - kind: misspelled_method
+    description: Misspell a known Strudel pattern method
+
+  - kind: invalid_slow_argument
+    description: Replace a slow factor with an undefined value
+
+  - kind: missing_layer_expression
+    description: Remove the first expression from a stack

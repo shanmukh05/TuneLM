@@ -1,0 +1,82 @@
+output: datasets/sft/train.jsonl
+samples_file: datasets/sft/samples.jsonl
+# Batch workflow: prompts -> samples -> validate -> regenerate (or stage: full)
+stage: samples
+prompts_file: datasets/sft/prompts.jsonl
+count: 5000
+# Stop after this many task specifications if validation cannot reach count.
+max_tasks: 10000
+mix:
+  compose: 0.60
+  edit: 0.20
+  repair: 0.20
+# Limit which task types to generate prompts/samples for (omit to use all mix types).
+task_types:
+  - compose
+  - edit
+  - repair
+seed: 42
+# Resume into prompts_file, samples_file, or output when true and the file exists.
+append: true
+batch:
+  enabled: false
+  poll_seconds: 30
+  # Use inline batch for <=100 requests (faster for smoke); file upload above that.
+  inline_max_requests: 100
+  regenerate_validate: true
+compose:
+  prompt_temperature: 0.9
+  prompt_max_tokens: 4096
+  # Bias toward short scene/mood prompts (levels 1–2) over narrative arcs (level 4).
+  prompt_level_weights:
+    1: 0.30
+    2: 0.30
+    3: 0.25
+    4: 0.15
+  prompt_author:
+    strategy: weighted
+    models:
+      gemini-3.8-flash:
+        enabled: true
+        provider: gemini
+        model: gemini-3.8-flash
+    weights:
+      gemini-3.8-flash: 1.0
+max_attempts: 5
+temperature: 0.7
+max_tokens: 16384
+minimum_constraint_score: 0.75
+minimum_task_consistency_score:
+  default: 0.80
+  edit: 0.50
+  repair: 0.50
+
+strategy: weighted
+models:
+  gemini-3.8-flash:
+    enabled: true
+    provider: gemini
+    model: gemini-3.8-flash
+  # gpt-5.6-sol:
+  #   enabled: true
+  #   provider: openai
+  #   model: gpt-5.6-sol
+  # deepseek-flash:
+  #   enabled: true
+  #   provider: deepseek
+  #   model: deepseek-flash
+  # qwen-3.8-max:
+  #   enabled: true
+  #   provider: openrouter
+  #   model: qwen/qwen3.8-max-0902
+weights:
+  gemini-3.8-flash: 1.0
+  # gpt-5.6-sol: 1.0
+  # deepseek-flash: 1.0
+  # qwen-3.8-max: 0.5
+  # gpt-5.6-luna: 1.0
+strudel:
+  backend: node
+  timeout_seconds: 10
+  cycles: 2
+  max_events: 4096

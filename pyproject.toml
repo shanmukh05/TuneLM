@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tunelm"
+version = "0.1.0"
+description = "Verifiable training pipelines for LLM-generated Strudel music"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+  "pydantic>=2.10,<3",
+  "PyYAML>=6.0,<7",
+]
+
+[project.optional-dependencies]
+providers = [
+  "anthropic>=0.49",
+  "google-genai>=1.0",
+  "openai>=1.65",
+]
+train = [
+  "accelerate>=1.2",
+  "datasets>=3.2",
+  "peft>=0.14",
+  "transformers>=4.48",
+  "trl>=0.15",
+]
+unsloth = ["unsloth"]
+dev = ["pytest>=8.0", "ruff>=0.9"]
+
+[project.scripts]
+tunelm-generate = "tunelm.cli:generate_main"
+tunelm-train = "tunelm.cli:train_main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tunelm"]
+
+[tool.hatch.build]
+artifacts = ["src/tunelm/strudel/bridge.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "gpu: needs a CUDA GPU and may load model weights",
+  "slow: long-running integration checks",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

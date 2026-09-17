@@ -1,0 +1,267 @@
+operations:
+  - instruction_templates:
+      - "Make the drums twice as dense while preserving tempo and melody."
+      - "Double the drum density but keep the tempo and melodic content unchanged."
+      - "Increase drum activity to twice the current level without altering tempo or notes."
+    expected_changes: {drum_density: increase}
+    preserve: [tempo, notes]
+
+  - instruction_templates:
+      - "Increase the tempo but preserve the instruments and melody."
+      - "Speed up the piece while keeping the same instruments and melodic lines."
+      - "Raise the BPM without changing which instruments play or the note content."
+    expected_changes: {tempo: increase}
+    preserve: [instruments, notes]
+
+  - instruction_templates:
+      - "Add another musical layer without changing the tempo."
+      - "Introduce an additional layer while keeping tempo constant."
+      - "Layer in one more musical voice without altering the BPM."
+    expected_changes: {layer_count: increase}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Slow down the tempo while keeping instruments and melody intact."
+      - "Decrease the BPM but preserve the instrumentation and notes."
+      - "Make the piece slower without changing instruments or melodic content."
+    expected_changes: {tempo: decrease}
+    preserve: [instruments, notes]
+
+  - instruction_templates:
+      - "Reduce drum density by half while preserving tempo and melody."
+      - "Make the drums sparser, keeping tempo and notes the same."
+      - "Halve the drum activity without changing tempo or melodic lines."
+    expected_changes: {drum_density: decrease}
+    preserve: [tempo, notes]
+
+  - instruction_templates:
+      - "Remove one musical layer while keeping tempo unchanged."
+      - "Drop a layer from the arrangement without changing the BPM."
+      - "Simplify by removing one layer, preserving tempo."
+    expected_changes: {layer_count: decrease}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add a bass layer without changing tempo or drums."
+      - "Introduce bass while keeping tempo and drum pattern intact."
+    expected_changes: {layer_count: increase, add_instruments: [bass]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Add piano to the arrangement without changing tempo."
+      - "Layer in piano while keeping the same BPM."
+    expected_changes: {layer_count: increase, add_instruments: [piano]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add synth pad without altering tempo or melody."
+      - "Introduce a pad layer, keeping tempo and notes unchanged."
+    expected_changes: {layer_count: increase, add_instruments: [pad]}
+    preserve: [tempo, notes]
+
+  - instruction_templates:
+      - "Add hi-hats while preserving tempo and melody."
+      - "Layer in hi-hats without changing BPM or notes."
+    expected_changes: {layer_count: increase, add_instruments: [hh]}
+    preserve: [tempo, notes]
+
+  - instruction_templates:
+      - "Make drums denser while keeping tempo and instruments unchanged."
+      - "Increase drum activity without changing BPM or instrumentation."
+    expected_changes: {drum_density: increase}
+    preserve: [tempo, instruments]
+
+  - instruction_templates:
+      - "Speed up slightly while preserving all instruments."
+      - "Increase tempo modestly, keeping the same instrument palette."
+    expected_changes: {tempo: increase}
+    preserve: [instruments]
+
+  - instruction_templates:
+      - "Slow down slightly while preserving all instruments."
+      - "Decrease tempo modestly, keeping instrumentation the same."
+    expected_changes: {tempo: decrease}
+    preserve: [instruments]
+
+  - instruction_templates:
+      - "Add strings layer without changing tempo or drums."
+    expected_changes: {layer_count: increase, add_instruments: [strings]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Add pluck melody layer while keeping tempo constant."
+    expected_changes: {layer_count: increase, add_instruments: [pluck]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add guitar without changing tempo or altering the existing layer content."
+    expected_changes: {layer_count: increase, add_instruments: [guitar]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Increase tempo and add another layer."
+    expected_changes: {tempo: increase, layer_count: increase}
+    preserve: [instruments]
+
+  - instruction_templates:
+      - "Make drums twice as dense and add a synth layer."
+    expected_changes: {drum_density: increase, layer_count: increase, add_instruments: [synth]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Slow down and reduce drum density."
+    expected_changes: {tempo: decrease, drum_density: decrease}
+    preserve: [notes]
+
+  - instruction_templates:
+      - "Speed up and make drums denser."
+    expected_changes: {tempo: increase, drum_density: increase}
+    preserve: [instruments]
+
+  - instruction_templates:
+      - "Add percussion layer without changing tempo."
+    expected_changes: {layer_count: increase, add_instruments: [perc]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add organ layer while preserving tempo and melody."
+    expected_changes: {layer_count: increase, add_instruments: [organ]}
+    preserve: [tempo, notes]
+
+  - instruction_templates:
+      - "Increase drum density while keeping melody and instruments."
+    expected_changes: {drum_density: increase}
+    preserve: [notes, instruments]
+
+  - instruction_templates:
+      - "Add another layer and keep drum density unchanged."
+    expected_changes: {layer_count: increase}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Raise tempo while preserving drum density and notes."
+    expected_changes: {tempo: increase}
+    preserve: [drum_density, notes]
+
+  - instruction_templates:
+      - "Lower tempo while preserving drum density and notes."
+    expected_changes: {tempo: decrease}
+    preserve: [drum_density, notes]
+
+  - instruction_templates:
+      - "Add flute layer without changing tempo or drums."
+    expected_changes: {layer_count: increase, add_instruments: [flute]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Make the groove denser on drums only, keep everything else."
+    expected_changes: {drum_density: increase}
+    preserve: [tempo, notes, instruments]
+
+  - instruction_templates:
+      - "Add a violin layer while keeping the tempo unchanged."
+      - "Bring in violin without altering the BPM."
+    expected_changes: {layer_count: increase, add_instruments: [violin]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add a cello layer without changing tempo or drums."
+      - "Introduce cello while preserving the BPM and drum activity."
+    expected_changes: {layer_count: increase, add_instruments: [cello]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Layer in a harp while preserving the current tempo."
+      - "Add harp to the arrangement without changing BPM."
+    expected_changes: {layer_count: increase, add_instruments: [harp]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add a saxophone layer and leave the tempo alone."
+      - "Introduce saxophone without altering the BPM."
+    expected_changes: {layer_count: increase, add_instruments: [saxophone]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add trumpet while preserving tempo and drum density."
+      - "Bring in a trumpet layer without changing BPM or drum activity."
+    expected_changes: {layer_count: increase, add_instruments: [trumpet]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Add clarinet without changing the existing tempo."
+      - "Introduce a clarinet layer and keep the BPM fixed."
+    expected_changes: {layer_count: increase, add_instruments: [clarinet]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add a marimba layer while preserving tempo and drums."
+      - "Layer in marimba without changing BPM or drum density."
+    expected_changes: {layer_count: increase, add_instruments: [marimba]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Add shaker and keep the melody and tempo unchanged."
+      - "Introduce a shaker layer without altering BPM or notes."
+    expected_changes: {layer_count: increase, add_instruments: [shaker]}
+    preserve: [tempo, notes]
+
+  - instruction_templates:
+      - "Add tambourine without changing tempo or melody."
+      - "Layer in tambourine while preserving BPM and notes."
+    expected_changes: {layer_count: increase, add_instruments: [tambourine]}
+    preserve: [tempo, notes]
+
+  - instruction_templates:
+      - "Add cowbell while keeping the tempo fixed."
+      - "Introduce a cowbell layer without changing BPM."
+    expected_changes: {layer_count: increase, add_instruments: [cowbell]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add a choir layer without altering tempo or drums."
+      - "Bring in choir while preserving BPM and drum activity."
+    expected_changes: {layer_count: increase, add_instruments: [choir]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Add accordion and leave the tempo unchanged."
+      - "Introduce an accordion layer at the same BPM."
+    expected_changes: {layer_count: increase, add_instruments: [accordion]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add harmonica while preserving tempo and drums."
+      - "Layer in harmonica without changing BPM or drum density."
+    expected_changes: {layer_count: increase, add_instruments: [harmonica]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Add a banjo layer and keep the tempo constant."
+      - "Introduce banjo without altering the BPM."
+    expected_changes: {layer_count: increase, add_instruments: [banjo]}
+    preserve: [tempo]
+
+  - instruction_templates:
+      - "Add nylon-string guitar without changing tempo or drum activity."
+      - "Bring in a nylon guitar layer while preserving BPM and drum density."
+    expected_changes: {layer_count: increase, add_instruments: [nylon-guitar]}
+    preserve: [tempo, drum_density]
+
+  - instruction_templates:
+      - "Slow the track down and add a pad layer."
+      - "Lower the BPM while introducing an additional pad layer."
+    expected_changes: {tempo: decrease, layer_count: increase, add_instruments: [pad]}
+    preserve: [drum_density]
+
+  - instruction_templates:
+      - "Speed up the piece but make the drums sparser."
+      - "Raise the tempo while reducing drum activity."
+    expected_changes: {tempo: increase, drum_density: decrease}
+    preserve: [notes]
+
+  - instruction_templates:
+      - "Remove a layer and reduce the drum density, keeping tempo fixed."
+      - "Simplify one layer and make the drums sparser without changing BPM."
+    expected_changes: {layer_count: decrease, drum_density: decrease}
+    preserve: [tempo]

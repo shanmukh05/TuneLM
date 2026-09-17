@@ -1,0 +1,46 @@
+extends: model.yaml
+model:
+  adapter: checkpoints/qwen3-06b-smoke-sft
+  max_seq_length: 2048
+lora:
+  enabled: false
+  rank: 16
+  alpha: 32
+data:
+  train_file: datasets/rl/sample.jsonl
+strudel:
+  backend: node
+  timeout_seconds: 3
+  cycles: 2
+  max_events: 2048
+rewards:
+  format:
+    enabled: true
+    weight: 0.1
+  execution:
+    enabled: true
+    weight: 0.4
+  constraints:
+    enabled: true
+    weight: 0.5
+  edit_consistency:
+    enabled: true
+    weight: 0.5
+  repair_consistency:
+    enabled: true
+    weight: 0.5
+training:
+  backend: transformers
+  output_dir: checkpoints/qwen3-06b-smoke-grpo
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 0.000005
+  num_generations: 2
+  max_completion_length: 1024
+  max_steps: 5
+  logging_steps: 1
+  save_steps: 5
+  bf16: true
+  report_to: none
+  run_name: qwen3-06b-smoke-grpo
+  seed: 42

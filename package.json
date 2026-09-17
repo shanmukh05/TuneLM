@@ -1,0 +1,16 @@
+{
+  "name": "tunelm-strudel-bridge",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "postinstall": "node scripts/patch-kabelsalat.mjs"
+  },
+  "dependencies": {
+    "@strudel/core": "1.2.6",
+    "@strudel/mini": "1.2.6",
+    "@strudel/tonal": "1.2.6",
+    "@strudel/transpiler": "1.2.6"
+  }
+}

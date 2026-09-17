@@ -1,0 +1,52 @@
+output: datasets/rl/train.jsonl
+stage: full
+prompts_file: datasets/rl/prompts.jsonl
+count: 3000
+# Resume into prompts_file or output when true and the file already exists.
+append: true
+batch:
+  enabled: true
+  poll_seconds: 30
+  # Use inline batch for <=100 requests (faster for smoke); file upload above that.
+  inline_max_requests: 100
+seed: 42
+mix:
+  compose: 0.60
+  repair: 0.20
+  edit: 0.20
+mode: hybrid
+llm_fraction: 0.3
+prompt_author:
+  prompt_temperature: 0.9
+  prompt_max_tokens: 4096
+  compose_styles:
+    - scene
+    - musician
+  edit_styles:
+    - imperative
+    - conversational
+  repair_styles:
+    - direct
+    - collaborative
+    - diagnostic
+  strategy: weighted
+  models:
+    gemini-3.8-flash:
+      enabled: true
+      provider: gemini
+      model: gemini-3.8-flash
+  weights:
+    gemini-3.8-flash: 1.0
+llm:
+  strategy: weighted
+  models:
+    gemini-3.8-flash:
+      enabled: true
+      provider: gemini
+      model: gemini-3.8-flash
+  weights:
+    gemini-3.8-flash: 1.0
+  temperature: 0.9
+  max_tokens: 16384
+  strudel:
+    backend: static

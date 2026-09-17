@@ -1,0 +1,26 @@
+tasks: datasets/evaluation/benchmark.jsonl
+predictions: results/predictions.jsonl
+output: results/evaluation.jsonl
+generation:
+  temperature: 0.0
+  max_new_tokens: 1536
+strudel:
+  backend: node
+  timeout_seconds: 3
+  cycles: 2
+rewards:
+  format:
+    enabled: true
+    weight: 0.1
+  execution:
+    enabled: true
+    weight: 0.4
+  constraints:
+    enabled: true
+    weight: 0.5
+  edit_consistency:
+    enabled: true
+    weight: 0.5
+  repair_consistency:
+    enabled: true
+    weight: 0.5

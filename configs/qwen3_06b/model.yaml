@@ -1,0 +1,11 @@
+model:
+  name: Qwen/Qwen3-0.6B
+  max_seq_length: 4096
+  load_in_4bit: true
+  compute_dtype: bfloat16
+  torch_dtype: bfloat16
+lora:
+  enabled: true
+  rank: 32
+  alpha: 64
+  dropout: 0.05

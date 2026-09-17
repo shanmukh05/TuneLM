@@ -1,0 +1,9 @@
+output: datasets/evaluation/benchmark.jsonl
+count: 500
+seed: 9001
+mix:
+  compose: 0.60
+  repair: 0.20
+  edit: 0.20
+disjoint_from: datasets/rl/train.jsonl
+min_unique_prompts: 0.95

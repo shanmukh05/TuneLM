@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TuneLM SFT Player</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #171a21;
+      --border: #2a3140;
+      --text: #e8ecf3;
+      --muted: #9aa6bd;
+      --accent: #6ea8ff;
+      --ok: #5fd38d;
+      --warn: #f0b35a;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--panel);
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .toolbar, .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    button, label.file {
+      background: #222833;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem 0.8rem;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover, label.file:hover { border-color: var(--accent); }
+    button.primary { background: #24406f; border-color: #3d6fbf; }
+    button.play { background: #1f4d35; border-color: #2f7a52; color: #dff7ea; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    label.file input { display: none; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      gap: 1rem;
+      padding: 1rem;
+      min-height: calc(100vh - 72px);
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      min-height: 0;
+    }
+    .meta {
+      display: grid;
+      gap: 0.35rem;
+      font-size: 0.92rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    .meta strong { color: var(--text); }
+    .prompt {
+      white-space: pre-wrap;
+      line-height: 1.5;
+      margin: 0 0 1rem;
+      font-size: 1rem;
+    }
+    .section-title {
+      margin: 0 0 0.5rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    pre, textarea {
+      width: 100%;
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #0c0e12;
+      color: #d7e0f2;
+      padding: 0.75rem;
+      font: 0.85rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      overflow: auto;
+      min-height: 12rem;
+      resize: vertical;
+    }
+    textarea { min-height: 18rem; }
+    .status { color: var(--muted); font-size: 0.9rem; }
+    .status.error { color: #ff8f8f; }
+    .status.ok { color: var(--ok); }
+    .pill {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      background: #222833;
+      border: 1px solid var(--border);
+      font-size: 0.78rem;
+      margin-right: 0.35rem;
+    }
+    .context pre { min-height: 6rem; max-height: 10rem; }
+    #indexInput {
+      width: 5rem;
+      background: #0c0e12;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.4rem 0.5rem;
+      font: inherit;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TuneLM SFT Player</h1>
+    <div class="toolbar">
+      <label class="file">
+        Load train.jsonl
+        <input id="fileInput" type="file" accept=".jsonl,.json,.txt" />
+      </label>
+      <button id="randomBtn" type="button" disabled>Random</button>
+      <button id="playBtn" class="play" type="button" disabled>Play</button>
+      <button id="stopBtn" type="button" disabled>Stop</button>
+    </div>
+    <div class="nav">
+      <button id="prevBtn" type="button" disabled>Prev</button>
+      <input id="indexInput" type="number" min="1" value="1" disabled />
+      <span id="countLabel" class="status">0 rows</span>
+      <button id="nextBtn" type="button" disabled>Next</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="meta" id="meta"></div>
+      <h2 class="section-title">Prompt</h2>
+      <p class="prompt" id="prompt">Load datasets/sft/train.jsonl to browse generated samples.</p>
+      <div id="contextBlocks"></div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Strudel code</h2>
+      <textarea id="code" spellcheck="false" placeholder="strudel_code appears here"></textarea>
+      <p id="status" class="status">Open this file via a local server or pick train.jsonl. Strudel needs a click to start audio.</p>
+    </section>
+  </main>
+
+  <script type="module">
+    import { initStrudel, evaluate, hush, samples } from "https://esm.sh/@strudel/web@1.2.6";
+
+    const state = { rows: [], index: 0, ready: false };
+
+    const els = {
+      fileInput: document.getElementById("fileInput"),
+      randomBtn: document.getElementById("randomBtn"),
+      playBtn: document.getElementById("playBtn"),
+      stopBtn: document.getElementById("stopBtn"),
+      prevBtn: document.getElementById("prevBtn"),
+      nextBtn: document.getElementById("nextBtn"),
+      indexInput: document.getElementById("indexInput"),
+      countLabel: document.getElementById("countLabel"),
+      meta: document.getElementById("meta"),
+      prompt: document.getElementById("prompt"),
+      contextBlocks: document.getElementById("contextBlocks"),
+      code: document.getElementById("code"),
+      status: document.getElementById("status"),
+    };
+
+    function setStatus(text, kind = "") {
+      els.status.textContent = text;
+      els.status.className = `status ${kind}`.trim();
+    }
+
+    function parseJsonl(text) {
+      return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, i) => {
+          try {
+            return JSON.parse(line);
+          } catch (error) {
+            throw new Error(`Line ${i + 1}: ${error.message}`);
+          }
+        });
+    }
+
+    function controlsMeta(row) {
+      const controls = row?.response?.controls || {};
+      const parts = [];
+      if (controls.bpm != null) parts.push(`BPM ${controls.bpm}`);
+      if (controls.key) parts.push(String(controls.key));
+      const mood = controls.mood || [];
+      if (mood.length) parts.push(mood.join(", "));
+      return parts;
+    }
+
+    function modelLabel(provenance, fallback = "unknown") {
+      if (!provenance) return fallback;
+      const model = provenance.model || provenance.model_id || fallback;
+      const provider = provenance.provider;
+      return provider ? `${model} (${provider})` : model;
+    }
+
+    function generationModels(row) {
+      const metadata = row?.metadata || {};
+      const promptAuthor =
+        row?.prompt_author || metadata.prompt_author || null;
+      const teacher = {
+        model: metadata.teacher_model || metadata.teacher,
+        model_id: metadata.teacher,
+        provider: metadata.teacher_provider,
+      };
+      const parts = [];
+      if (promptAuthor) {
+        let label = `Prompt: ${modelLabel(promptAuthor)}`;
+        if (promptAuthor.style) label += ` · ${promptAuthor.style}`;
+        parts.push(label);
+      }
+      if (teacher.model || teacher.model_id) {
+        parts.push(`Sample: ${modelLabel(teacher)}`);
+      }
+      return parts;
+    }
+
+    function contextBlock(title, code) {
+      if (!code) return "";
+      return `
+        <h2 class="section-title">${title}</h2>
+        <div class="context"><pre>${escapeHtml(code)}</pre></div>
+      `;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function render() {
+      const hasRows = state.rows.length > 0;
+      const row = hasRows ? state.rows[state.index] : null;
+      const enabled = hasRows && state.ready;
+
+      els.randomBtn.disabled = !enabled;
+      els.playBtn.disabled = !enabled;
+      els.stopBtn.disabled = !enabled;
+      els.prevBtn.disabled = !hasRows || state.index <= 0;
+      els.nextBtn.disabled = !hasRows || state.index >= state.rows.length - 1;
+      els.indexInput.disabled = !hasRows;
+      els.indexInput.max = String(Math.max(1, state.rows.length));
+      els.indexInput.value = String(hasRows ? state.index + 1 : 1);
+      els.countLabel.textContent = `${state.rows.length} rows`;
+
+      if (!row) {
+        els.meta.innerHTML = "";
+        els.contextBlocks.innerHTML = "";
+        els.code.value = "";
+        return;
+      }
+
+      const pills = [
+        row.task_type,
+        row.id,
+        ...generationModels(row).map((item) => `<span class="pill">${escapeHtml(item)}</span>`),
+        ...(controlsMeta(row).map((item) => `<span class="pill">${escapeHtml(item)}</span>`)),
+      ];
+      els.meta.innerHTML = pills
+        .map((item) => (item.startsWith("<") ? item : `<span class="pill">${escapeHtml(item)}</span>`))
+        .join("");
+
+      els.prompt.textContent = row.prompt || "(no prompt)";
+      els.contextBlocks.innerHTML = [
+        contextBlock("Original Strudel", row.original_code),
+        contextBlock("Broken Strudel", row.broken_code),
+        row.instruction && row.instruction !== row.prompt
+          ? `<h2 class="section-title">Instruction</h2><p class="prompt">${escapeHtml(row.instruction)}</p>`
+          : "",
+        row.preserve?.length
+          ? `<h2 class="section-title">Preserve</h2><p class="prompt">${escapeHtml(row.preserve.join(", "))}</p>`
+          : "",
+      ].join("");
+
+      els.code.value = row.response?.strudel_code || "";
+      setStatus(`Showing ${state.index + 1} / ${state.rows.length}`, "ok");
+    }
+
+    function loadRows(rows) {
+      state.rows = rows;
+      state.index = 0;
+      render();
+      setStatus(`Loaded ${rows.length} rows. Click Play or Random.`, "ok");
+    }
+
+    async function loadText(text) {
+      loadRows(parseJsonl(text));
+    }
+
+    async function loadFromUrl(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+      await loadText(await response.text());
+    }
+
+    async function playCurrent() {
+      const code = els.code.value.trim();
+      if (!code) {
+        setStatus("No Strudel code to play.", "error");
+        return;
+      }
+      try {
+        hush();
+        await evaluate(code, true);
+        setStatus("Playing…", "ok");
+      } catch (error) {
+        setStatus(String(error?.message || error), "error");
+      }
+    }
+
+    function showIndex(nextIndex) {
+      if (!state.rows.length) return;
+      state.index = Math.max(0, Math.min(state.rows.length - 1, nextIndex));
+      render();
+    }
+
+    els.fileInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        await loadText(await file.text());
+      } catch (error) {
+        setStatus(String(error?.message || error), "error");
+      }
+    });
+
+    els.randomBtn.addEventListener("click", () => {
+      if (!state.rows.length) return;
+      const next = Math.floor(Math.random() * state.rows.length);
+      showIndex(next);
+      void playCurrent();
+    });
+
+    els.playBtn.addEventListener("click", () => void playCurrent());
+    els.stopBtn.addEventListener("click", () => {
+      hush();
+      setStatus("Stopped.", "ok");
+    });
+    els.prevBtn.addEventListener("click", () => showIndex(state.index - 1));
+    els.nextBtn.addEventListener("click", () => showIndex(state.index + 1));
+    els.indexInput.addEventListener("change", () => {
+      const value = Number(els.indexInput.value);
+      if (!Number.isFinite(value)) return;
+      showIndex(value - 1);
+    });
+
+    initStrudel({
+      prebake: async () => {
+        await samples("github:tidalcycles/dirt-samples");
+        try {
+          const { registerSoundfonts } = await import("https://esm.sh/@strudel/soundfonts@1.2.6");
+          await registerSoundfonts();
+        } catch {
+          // GM samples still work for synth-only patterns.
+        }
+      },
+    }).then(() => {
+      state.ready = true;
+      render();
+      setStatus("Strudel ready. Load train.jsonl, then Play or Random.", "ok");
+      if (location.protocol !== "file:") {
+        const param = new URLSearchParams(location.search).get("data");
+        const data = param
+          ? new URL(param, location.href).pathname
+          : "/datasets/sft/train.jsonl";
+        loadFromUrl(data).catch(() => {
+          setStatus("Strudel ready. Pick train.jsonl or serve this page from the repo root.", "ok");
+        });
+      }
+    }).catch((error) => {
+      setStatus(`Strudel init failed: ${error?.message || error}`, "error");
+    });
+  </script>
+</body>
+</html>
