@@ -13,6 +13,7 @@ import pytest
 from tunelm.rewards import RewardEngine
 from tunelm.rl.trainer import RewardAdapter
 from tunelm.schemas import ComposeTask, ModelResponse, TaskConstraints, TempoRange, parse_task
+from tunelm.models.templates import training_record
 from tunelm.sft_data.validator import validate_solution
 from tunelm.strudel.controls import infer_controls_from_code
 from tunelm.strudel.executor import StrudelExecutor
@@ -44,6 +45,7 @@ def test_parse_execute_and_reward():
     assert executed.valid
     assert executed.features["tempo"] == 120
     assert not StrudelExecutor(backend="static").run('s("bd"').valid
+    assert StrudelExecutor(backend="static").run('// car\'s pulse\ns("bd")').valid
 
     task = parse_task(
         {
@@ -76,6 +78,27 @@ def test_compose_sft_ignores_hidden_constraints():
     report = validate_solution(task, response, StrudelExecutor(backend="static"))
     assert report.valid
     assert report.constraint_score is not None and report.constraint_score < 0.75
+
+
+def test_sft_record_masks_prompt_and_disables_thinking():
+    class Tokenizer:
+        eos_token = "<eos>"
+
+        def apply_chat_template(self, messages, **kwargs):
+            assert kwargs["enable_thinking"] is False
+            return "rendered prompt"
+
+    row = {
+        "id": "compose",
+        "task_type": "compose",
+        "prompt": "quiet piano",
+        "constraints": {},
+        "response": json.loads(_completion('setcpm(60/4)\nnote("c4").s("gm_piano")')),
+    }
+    record = training_record(row, Tokenizer())
+    assert record["prompt"] == "rendered prompt"
+    assert record["completion"].endswith("<eos>")
+    assert "quiet piano" not in record["completion"]
 
 
 @pytest.mark.skipif(

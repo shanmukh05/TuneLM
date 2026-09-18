@@ -187,7 +187,9 @@ class GeminiBatchClient:
     def _create_file_job(self, requests: Sequence[BatchRequest], *, display_name: str):
         from google.genai import types
 
-        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as handle:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".jsonl", delete=False, encoding="utf-8"
+        ) as handle:
             path = Path(handle.name)
             for request in requests:
                 handle.write(json.dumps(to_file_request_line(request), ensure_ascii=False) + "\n")

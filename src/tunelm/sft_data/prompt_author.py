@@ -102,7 +102,9 @@ def prompt_author_config(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def sample_compose_brief(rng: random.Random, level: int, vocab: VocabStore | None = None) -> ComposeBrief:
+def sample_compose_brief(
+    rng: random.Random, level: int, vocab: VocabStore | None = None
+) -> ComposeBrief:
     """Sample a level-scaled brief from repository vocabularies."""
     vocab = vocab or load_vocab()
     mood = rng.choice(vocab.moods)
@@ -129,13 +131,15 @@ def sample_compose_brief(rng: random.Random, level: int, vocab: VocabStore | Non
             rhythm=rng.choice(vocab.rhythms),
             structure=rng.choice(vocab.structures),
             texture=rng.choice(vocab.textures),
-            hints=[rng.choice(
-                (
-                    "introduce sparse drums after a short opening",
-                    "gradually increase drum density",
-                    "add a supporting layer as the piece develops",
+            hints=[
+                rng.choice(
+                    (
+                        "introduce sparse drums after a short opening",
+                        "gradually increase drum density",
+                        "add a supporting layer as the piece develops",
+                    )
                 )
-            )],
+            ],
         )
     count = rng.randint(2, min(4, len(vocab.instruments)))
     instruments = rng.sample(vocab.instruments, k=count)

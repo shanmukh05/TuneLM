@@ -23,8 +23,8 @@ npm install
 Confirm a training config without loading Gemma/Qwen checkpoints:
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/smoke_sft.yaml --dry-run
-python scripts/train.py --config configs/gemma4_2b/smoke_grpo.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/smoke_grpo.yaml --dry-run
 pytest
 ```
 
@@ -38,13 +38,11 @@ Install provider and training dependencies when needed:
 pip install -e '.[providers,train]'
 ```
 
-For the optional Unsloth loader/LoRA path, install `pip install -e '.[unsloth]'`
-on the Linux GPU machine and set `training.backend: unsloth`.
-
-Quantized training also needs a CUDA-compatible `torch` and `bitsandbytes` build:
+Quantized training also needs a CUDA-compatible `torch` build. `bitsandbytes`
+is included in the training extra:
 
 ```bash
-pip install torch bitsandbytes
+pip install torch
 ```
 
 ## Scripts
@@ -73,7 +71,7 @@ Training configs are grouped by model under `configs/<model>/`:
 
 ```
 configs/
-  gemma4_2b/          # default
+  gemma4_4b/          # default
     model.yaml        # shared HF name, quantization, LoRA defaults
     sft.yaml
     grpo.yaml
@@ -95,7 +93,7 @@ automatically.
 
 | Model | HF checkpoint | Notes |
 |-------|---------------|-------|
-| Gemma 4 2B (default) | `google/gemma-4-E2B-it` | Multimodal class; primary target |
+| Gemma 4 E4B (default) | `google/gemma-4-E4B-it` | About 8B total/4B effective parameters; text-only causal path |
 | Qwen3 0.6B | `Qwen/Qwen3-0.6B` | Smaller text-only baseline |
 
 ## 1. Verify Strudel execution
@@ -253,7 +251,8 @@ python scripts/validate_data.py \
   --input datasets/sft/train.jsonl \
   --kind sft \
   --check-execution \
-  --backend node
+  --backend node \
+  --validation-config configs/data/sft.yaml
 ```
 
 ### Batch staged workflow
@@ -325,24 +324,24 @@ teacher `models`. Legacy `providers:` blocks are still accepted and are converte
 to model ids automatically.
 
 For a local SFT smoke test without API keys, use `datasets/sft/sample.jsonl` with
-`configs/gemma4_2b/smoke_sft.yaml` or `configs/qwen3_06b/smoke_sft.yaml`.
+`configs/gemma4_4b/smoke_sft.yaml` or `configs/qwen3_06b/smoke_sft.yaml`.
 
 ## 4. Run SFT
 
 Dry-run locally before launching on a GPU:
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/smoke_sft.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml --dry-run
 ```
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/sft.yaml
+python scripts/train.py --config configs/gemma4_4b/sft.yaml
 ```
 
-Checkpoints land in `checkpoints/gemma4-2b-sft/`. For a quick smoke run:
+Checkpoints land in `checkpoints/gemma4-4b-sft/`. For a quick smoke run:
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/smoke_sft.yaml
+python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml
 ```
 
 ## 5. Run GRPO
@@ -350,19 +349,19 @@ python scripts/train.py --config configs/gemma4_2b/smoke_sft.yaml
 Generate the RL task bank and an SFT checkpoint first. Dry-run locally:
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/smoke_grpo.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/smoke_grpo.yaml --dry-run
 ```
 
 Then on a GPU:
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/grpo.yaml
+python scripts/train.py --config configs/gemma4_4b/grpo.yaml
 ```
 
 Smoke test:
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/smoke_grpo.yaml
+python scripts/train.py --config configs/gemma4_4b/smoke_grpo.yaml
 ```
 
 Default rewards:
@@ -380,7 +379,7 @@ Default rewards:
 ```bash
 python scripts/train.py \
   --config configs/eval/default.yaml \
-  --checkpoint checkpoints/gemma4-2b-grpo
+  --checkpoint checkpoints/gemma4-4b-grpo
 ```
 
 Use `--limit 10` for a smoke test. Outputs:
@@ -393,42 +392,52 @@ Use `--limit 10` for a smoke test. Outputs:
 ```bash
 python scripts/infer.py \
   "Create a slow emotional piano piece with subtle strings" \
-  --checkpoint checkpoints/gemma4-2b-grpo
+  --checkpoint checkpoints/gemma4-4b-grpo
 ```
 
 ## JarvisLabs training
 
-Run a single SFT or GRPO config on a cloud GPU. There is no multi-stage pipeline —
-pick the config you want and run it.
+Run SFT and GRPO as explicit, inspectable stages. Each run uploads the dataset
+selected by its config; GRPO also uploads its local SFT adapter when present.
 
 Prerequisites:
 
 - [JarvisLabs CLI](https://docs.jarvislabs.ai/): `uv tool install jarvislabs` then `jl setup`
 - SSH key: `jl ssh-key add ~/.ssh/id_ed25519.pub`
-- Optional `.env` / `.env.local` with `WANDB_API_KEY`, `GEMINI_API_KEY`, etc.
+- `.env` / `.env.local` with `WANDB_API_KEY`; optionally set `WANDB_PROJECT`
+  (defaults to `tunelm`), `WANDB_ENTITY`, `WANDB_RUN_GROUP`, and `HF_TOKEN`
 
 ```bash
-python3 scripts/jarvislabs/cloud_train.py self-check
+python3 scripts/jarvislabs/cloud_train.py self-check \
+  --config configs/gemma4_4b/sft.yaml
 
 # SFT smoke on L4
 python3 scripts/jarvislabs/cloud_train.py run \
   --gpu L4 \
-  --config configs/gemma4_2b/smoke_sft.yaml
+  --config configs/gemma4_4b/smoke_sft.yaml
 
-# Full GRPO after inspecting the SFT checkpoint
+# Full SFT; successful runs download to checkpoints/ and results/
+python3 scripts/jarvislabs/cloud_train.py run \
+  --gpu L4 \
+  --config configs/gemma4_4b/sft.yaml
+
+# Full GRPO after inspecting the downloaded SFT adapter
 python3 scripts/jarvislabs/cloud_train.py run \
   --gpu A100 \
-  --config configs/gemma4_2b/grpo.yaml \
+  --config configs/gemma4_4b/grpo.yaml \
   --keep
 ```
 
-The config filename must contain `sft` or `grpo` so the launcher accepts it.
-Training always runs through `scripts/train.py`, which routes from the config
-contents. Other commands:
+Training routes from config contents, not the filename. A fresh GRPO instance
+requires the SFT adapter under the configured local `checkpoints/` path. Reusing
+the SFT machine with `--on MACHINE_ID` also preserves its remote checkpoint.
+Metrics and sampled GRPO completions go to W&B for the full configs. Set
+`WANDB_LOG_MODEL=checkpoint` only when checkpoint artifact uploads are desired;
+the launcher always downloads checkpoint files directly. Other commands:
 
 | Command | Purpose |
 |---------|---------|
-| `fetch --on MACHINE_ID` | Download `checkpoints/` and `results/` |
+| `fetch --on MACHINE_ID` | Download into local `checkpoints/` and `results/` |
 | `status --on MACHINE_ID` | Show saved session and instance status |
 | `down --on MACHINE_ID` | Pause instance (`--destroy` to delete) |
 

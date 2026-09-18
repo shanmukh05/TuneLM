@@ -152,8 +152,25 @@ def messages_for_task(task: RLTask) -> list[dict[str, str]]:
     ]
 
 
-def format_training_text(example: dict, tokenizer=None) -> str:
-    response = json.dumps(example["response"], ensure_ascii=False)
+def render_generation_prompt(messages: list[dict[str, str]], tokenizer) -> str:
+    """Render a chat prompt with model reasoning disabled when supported."""
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+    except TypeError:
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+
+def task_from_example(example: dict) -> RLTask:
+    """Rebuild the task portion of an SFT row without leaking its response."""
     task_type = example["task_type"]
     payload = {
         key: example[key] for key in ("id", "task_type", "prompt", "constraints") if key in example
@@ -177,7 +194,17 @@ def format_training_text(example: dict, tokenizer=None) -> str:
         )
     from tunelm.schemas import parse_task
 
-    messages = [*messages_for_task(parse_task(payload)), {"role": "assistant", "content": response}]
-    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
-        return tokenizer.apply_chat_template(messages, tokenize=False)
-    return "\n".join(f"<{m['role']}>\n{m['content']}" for m in messages)
+    return parse_task(payload)
+
+
+def training_record(example: dict, tokenizer=None) -> dict:
+    """Return TRL's conversational prompt-completion representation."""
+    response = json.dumps(example["response"], ensure_ascii=False)
+    prompt = messages_for_task(task_from_example(example))
+    if tokenizer is not None:
+        eos = tokenizer.eos_token or ""
+        return {"prompt": render_generation_prompt(prompt, tokenizer), "completion": response + eos}
+    return {
+        "prompt": prompt,
+        "completion": [{"role": "assistant", "content": response}],
+    }

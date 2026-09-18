@@ -1,8 +1,4 @@
-"""Load TuneLM checkpoints and generate validated Strudel responses.
-
-Message rendering uses a minimal local format only when the checkpoint tokenizer
-cannot supply a chat template.
-"""
+"""Load TuneLM checkpoints and generate validated Strudel responses."""
 
 from __future__ import annotations
 
@@ -10,21 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tunelm.models.templates import SYSTEM_PROMPT
+from tunelm.models.templates import SYSTEM_PROMPT, render_generation_prompt
 from tunelm.strudel.executor import StrudelExecutor
 from tunelm.strudel.parser import parse_model_response
-
-
-def _render_messages(messages: list[dict[str, str]], tokenizer) -> str:
-    apply_template = getattr(tokenizer, "apply_chat_template", None)
-    if callable(apply_template):
-        try:
-            return apply_template(messages, tokenize=False, add_generation_prompt=True)
-        except (TypeError, ValueError):
-            # Transformers exposes apply_chat_template even when a tokenizer has
-            # no configured template. Fall back to TuneLM's portable rendering.
-            pass
-    return "\n".join(f"<{m['role']}>\n{m['content']}" for m in messages) + "\n<assistant>\n"
 
 
 def load_checkpoint(checkpoint: str):
@@ -32,18 +16,28 @@ def load_checkpoint(checkpoint: str):
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:
         raise RuntimeError("Install TuneLM training extras: pip install -e '.[train]'") from exc
-    tokenizer = AutoTokenizer.from_pretrained(checkpoint, trust_remote_code=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        checkpoint, trust_remote_code=False, padding_side="left"
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     if (Path(checkpoint) / "adapter_config.json").exists():
         from peft import AutoPeftModelForCausalLM
 
         model = AutoPeftModelForCausalLM.from_pretrained(
-            checkpoint, device_map="auto", torch_dtype="auto", trust_remote_code=False
+            checkpoint, device_map="auto", dtype="auto", trust_remote_code=False
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            checkpoint, device_map="auto", torch_dtype="auto", trust_remote_code=False
+            checkpoint, device_map="auto", dtype="auto", trust_remote_code=False
         )
+    model.eval()
     return model, tokenizer
+
+
+def _input_device(model):
+    """Return the embedding device, including for Accelerate-dispatched models."""
+    return model.get_input_embeddings().weight.device
 
 
 def generate_messages(
@@ -56,8 +50,8 @@ def generate_messages(
 ) -> str:
     import torch
 
-    text = _render_messages(messages, tokenizer)
-    inputs = tokenizer(text, return_tensors="pt").to(model.device)
+    text = render_generation_prompt(messages, tokenizer)
+    inputs = tokenizer(text, return_tensors="pt").to(_input_device(model))
     generation = {
         "max_new_tokens": max_new_tokens,
         "do_sample": temperature > 0,

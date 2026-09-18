@@ -30,10 +30,14 @@ def refuse_overwrite(path: Path, config: dict[str, Any]) -> None:
         raise FileExistsError(f"Refusing to overwrite {path}; set append: true or remove it")
 
 
-def require_single_gemini_model(config: dict[str, Any], *, label: str = "generation") -> tuple[str, str, str]:
+def require_single_gemini_model(
+    config: dict[str, Any], *, label: str = "generation"
+) -> tuple[str, str, str]:
     """Return model_id, provider name, and API model slug."""
     entries = enabled_model_entries(config)
-    gemini_entries = [(model_id, spec) for model_id, spec in entries if spec.get("provider") == "gemini"]
+    gemini_entries = [
+        (model_id, spec) for model_id, spec in entries if spec.get("provider") == "gemini"
+    ]
     if len(gemini_entries) != 1:
         raise RuntimeError(
             f"Batch {label} requires exactly one enabled Gemini model with an API key"

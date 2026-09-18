@@ -13,7 +13,7 @@ from tunelm.config import load_config, project_path
 from tunelm.training_preflight import (
     dry_run_training,
     infer_pipeline,
-    require_cuda_when_requested,
+    require_training_runtime,
     validate_training_config,
 )
 
@@ -100,8 +100,13 @@ def run_train(
         print(json.dumps(evaluate_predictions(config), indent=2))
         return
 
-    validate_training_config(config, config_path=config_path, strict_datasets=True)
-    require_cuda_when_requested(config)
+    validate_training_config(
+        config,
+        config_path=config_path,
+        strict_datasets=True,
+        strict_adapter=True,
+    )
+    require_training_runtime(config)
     if kind == "grpo":
         from tunelm.rl.trainer import train_rl
 

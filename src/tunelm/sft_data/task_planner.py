@@ -13,7 +13,7 @@ from tunelm.data.mix import task_counts
 from tunelm.rl_data.corruption import repair_tasks
 from tunelm.rl_data.editing import editing_tasks
 from tunelm.rl_data.prompt_author import sample_style, task_author_payload, task_style_system_prompt
-from tunelm.schemas import ComposeTask, EditTask, RepairTask, RLTask, TaskType
+from tunelm.schemas import ComposeTask, RLTask
 from tunelm.sft_data.prompt_author import (
     ComposeBrief,
     brief_to_constraints,
@@ -110,7 +110,10 @@ def plan_sft_tasks(
                 request=BatchRequest(
                     key=task.id,
                     messages=[
-                        {"role": "system", "content": task_style_system_prompt(task.task_type, style)},
+                        {
+                            "role": "system",
+                            "content": task_style_system_prompt(task.task_type, style),
+                        },
                         {
                             "role": "user",
                             "content": json.dumps(task_author_payload(task), ensure_ascii=False),

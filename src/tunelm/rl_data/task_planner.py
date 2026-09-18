@@ -47,7 +47,10 @@ def plan_rl_styled_prompts(
                 request=BatchRequest(
                     key=task.id,
                     messages=[
-                        {"role": "system", "content": task_style_system_prompt(task.task_type, style)},
+                        {
+                            "role": "system",
+                            "content": task_style_system_prompt(task.task_type, style),
+                        },
                         {
                             "role": "user",
                             "content": json.dumps(task_author_payload(task), ensure_ascii=False),

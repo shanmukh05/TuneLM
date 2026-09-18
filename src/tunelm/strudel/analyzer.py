@@ -151,6 +151,8 @@ def _advance_quote(char: str, quote: str, escaped: bool) -> tuple[str | None, bo
 
 
 def _delimiter_error(code: str) -> str | None:
+    code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
+    code = re.sub(r"//[^\n]*", "", code)
     stack: list[str] = []
     quote: str | None = None
     escaped = False

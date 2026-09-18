@@ -10,7 +10,7 @@ import re
 from typing import Literal
 
 from tunelm.schemas import LayerControl, MusicControls
-from tunelm.strudel.analyzer import DRUM_NAMES, analyze_code, canonical_instrument, infer_tempo
+from tunelm.strudel.analyzer import DRUM_NAMES, analyze_code, canonical_instrument
 
 LayerRole = Literal[
     "rhythm",

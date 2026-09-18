@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from tunelm.config import project_path
-from tunelm.data.batch_common import batch_settings, refuse_overwrite, require_single_gemini_model, run_batch
+from tunelm.data.batch_common import refuse_overwrite, require_single_gemini_model, run_batch
 from tunelm.data.diversity import load_prompt_hashes
 from tunelm.data.resume import resume_remaining
 from tunelm.data.task_factory import generate_tasks, task_signature
@@ -25,7 +25,9 @@ def _output_path(config: dict[str, Any]) -> Path:
 
 
 def _forbidden_signatures(config: dict[str, Any], existing_rows: list[dict]) -> set[str]:
-    forbidden = load_prompt_hashes(config.get("disjoint_from")) if config.get("disjoint_from") else set()
+    forbidden = (
+        load_prompt_hashes(config.get("disjoint_from")) if config.get("disjoint_from") else set()
+    )
     for row in existing_rows:
         forbidden.add(task_signature(row))
     return forbidden

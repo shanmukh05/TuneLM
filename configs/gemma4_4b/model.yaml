@@ -1,6 +1,5 @@
 model:
-  name: google/gemma-4-E2B-it
-  model_class: multimodal
+  name: google/gemma-4-E4B-it
   max_seq_length: 4096
   load_in_4bit: true
   compute_dtype: bfloat16

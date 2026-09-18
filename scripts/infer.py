@@ -5,7 +5,9 @@ from tunelm.inference import dumps, generate
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate validated Strudel with a TuneLM checkpoint")
+    parser = argparse.ArgumentParser(
+        description="Generate validated Strudel with a TuneLM checkpoint"
+    )
     parser.add_argument("prompt")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -25,4 +27,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

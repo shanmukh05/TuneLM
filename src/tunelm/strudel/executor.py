@@ -19,7 +19,7 @@ class StrudelExecutor:
     def __init__(
         self,
         *,
-        backend: Backend = "auto",
+        backend: Backend = "node",
         timeout_seconds: float = 3.0,
         cycles: float = 2,
         max_events: int = 2048,
@@ -94,7 +94,7 @@ class StrudelExecutor:
 def executor_from_config(config: dict) -> StrudelExecutor:
     values = config.get("strudel", config)
     return StrudelExecutor(
-        backend=values.get("backend", "auto"),
+        backend=values.get("backend", "node"),
         timeout_seconds=float(values.get("timeout_seconds", 3)),
         cycles=float(values.get("cycles", 2)),
         max_events=int(values.get("max_events", 2048)),

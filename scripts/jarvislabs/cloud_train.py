@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from tunelm.config import repo_root, training_script_for_config
+from tunelm.config import load_config, repo_root
 
 
 REMOTE_DIRNAME = "tunelm"
@@ -77,20 +77,34 @@ def _ignore(_directory: str, names: list[str]) -> list[str]:
     return [name for name in names if name in SKIP_DIR_NAMES or name.endswith(".egg-info")]
 
 
-def stage_payload(root: Path, dest: Path) -> None:
+def _copy_into_payload(root: Path, dest: Path, value: str) -> None:
+    source = (root / value).resolve()
+    try:
+        relative = source.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"cloud artifacts must be inside the repository: {source}") from exc
+    if not source.exists():
+        raise FileNotFoundError(f"required cloud artifact not found: {relative}")
+    target = dest / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, target, dirs_exist_ok=True, ignore=_ignore)
+    else:
+        shutil.copy2(source, target)
+
+
+def stage_payload(root: Path, dest: Path, config_path: str) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
     shutil.copytree(root / "src", dest / "src", ignore=_ignore)
     shutil.copytree(root / "configs", dest / "configs")
     shutil.copytree(root / "scripts", dest / "scripts")
-    shutil.copytree(root / "tests", dest / "tests", ignore=_ignore)
-    for relative_path in ("sft/sample.jsonl", "rl/train.jsonl"):
-        source = root / "datasets" / relative_path
-        if source.is_file():
-            target = dest / "datasets" / relative_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+    config = load_config(root / config_path)
+    _copy_into_payload(root, dest, config["data"]["train_file"])
+    adapter = config.get("model", {}).get("adapter")
+    if adapter and (root / adapter).exists():
+        _copy_into_payload(root, dest, adapter)
     for name in ("pyproject.toml", "package.json", "package-lock.json", "README.md"):
         source = root / name
         if source.is_file():
@@ -179,7 +193,9 @@ def ensure_running(machine_id: str) -> str:
     if status == "running":
         return machine_id
     if status != "paused":
-        raise RuntimeError(f"instance {machine_id} is {status or 'unknown'}; resume or create a new one")
+        raise RuntimeError(
+            f"instance {machine_id} is {status or 'unknown'}; resume or create a new one"
+        )
     payload = jl_json(["resume", machine_id, "--yes"])
     if isinstance(payload, dict) and payload.get("machine_id"):
         return str(payload["machine_id"])
@@ -205,8 +221,12 @@ def remote_home(machine_id: str) -> str:
     return home
 
 
-def upload_env_file(machine_id: str, remote_root: str, filename: str, values: dict[str, str]) -> None:
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="tunelm-env-", delete=False) as handle:
+def upload_env_file(
+    machine_id: str, remote_root: str, filename: str, values: dict[str, str]
+) -> None:
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", prefix="tunelm-env-", delete=False
+    ) as handle:
         for key, value in values.items():
             handle.write(f"{key}={shlex.quote(value)}\n")
         temp_path = Path(handle.name)
@@ -217,7 +237,7 @@ def upload_env_file(machine_id: str, remote_root: str, filename: str, values: di
         temp_path.unlink(missing_ok=True)
 
 
-def setup_remote(machine_id: str, remote_root: str) -> None:
+def setup_remote(machine_id: str, remote_root: str, config: str) -> None:
     script = f"{remote_root}/scripts/jarvislabs/remote_setup.sh"
     jl(
         [
@@ -226,25 +246,27 @@ def setup_remote(machine_id: str, remote_root: str) -> None:
             "--",
             "sh",
             "-lc",
-            f"chmod +x {shlex.quote(script)} && {shlex.quote(script)}",
+            f"chmod +x {shlex.quote(script)} && {shlex.quote(script)} {shlex.quote(config)}",
         ]
     )
 
 
 def remote_train_shell(remote_root: str, config: str) -> str:
-    script = training_script_for_config(config)
-    command = [".venv/bin/python", script, "--config", config]
+    command = [".venv/bin/python", "scripts/train.py", "--config", config]
     quoted = " ".join(shlex.quote(part) for part in command)
     return (
         f"set -euo pipefail; cd {shlex.quote(remote_root)}; "
         "if [ -f .remote.env ]; then set -a; . ./.remote.env; set +a; fi; "
+        "mkdir -p checkpoints results; "
         f"exec {quoted}"
     )
 
 
 def start_train(machine_id: str, remote_root: str, config: str) -> str:
     shell = remote_train_shell(remote_root, config)
-    payload = jl_json(["run", "--on", machine_id, "--no-follow", "--yes", "--", "bash", "-lc", shell])
+    payload = jl_json(
+        ["run", "--on", machine_id, "--no-follow", "--yes", "--", "bash", "-lc", shell]
+    )
     if not isinstance(payload, dict) or not payload.get("run_id"):
         raise RuntimeError(f"jl run did not return a run_id: {payload!r}")
     return str(payload["run_id"])
@@ -269,10 +291,9 @@ def run_state(run_id: str) -> str:
     return str(payload.get("state") or payload.get("status") or "").lower()
 
 
-def fetch_results(machine_id: str, remote_root: str, dest: Path) -> None:
-    dest.mkdir(parents=True, exist_ok=True)
-    jl(["download", machine_id, f"{remote_root}/checkpoints", str(dest / "checkpoints"), "-r"])
-    jl(["download", machine_id, f"{remote_root}/results", str(dest / "results"), "-r"])
+def fetch_results(machine_id: str, remote_root: str, root: Path) -> None:
+    jl(["download", machine_id, f"{remote_root}/checkpoints", str(root), "-r"])
+    jl(["download", machine_id, f"{remote_root}/results", str(root), "-r"])
 
 
 def stop_instance(machine_id: str, *, destroy: bool) -> None:
@@ -291,30 +312,53 @@ def resolve_machine_id(args: argparse.Namespace, root: Path) -> str:
     raise RuntimeError("pass --on MACHINE_ID or run `cloud_train.py run` first")
 
 
+def _validate_cloud_credentials(config: dict) -> None:
+    report_to = config.get("training", {}).get("report_to")
+    if report_to == "wandb" and not os.environ.get("WANDB_API_KEY"):
+        raise RuntimeError("WANDB_API_KEY is required because training.report_to=wandb")
+    model_name = str(config.get("model", {}).get("name", ""))
+    has_hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if model_name.startswith("google/gemma") and not has_hf_token:
+        raise RuntimeError("HF_TOKEN is required to download Gemma on a fresh instance")
+
+
+def _validate_cloud_adapter(config: dict, args: argparse.Namespace, root: Path) -> None:
+    adapter = config.get("model", {}).get("adapter")
+    if adapter and not (root / adapter).exists() and not args.machine_id:
+        raise FileNotFoundError(
+            f"SFT adapter not found: {adapter}. Run/fetch SFT first or reuse its instance with --on."
+        )
+
+
 def validate_run(args: argparse.Namespace, root: Path) -> None:
     if not args.machine_id and not args.gpu and not args.cpu:
         raise RuntimeError("pass --gpu TYPE, --cpu, or --on MACHINE_ID")
     if Path(args.config).is_absolute():
-        raise RuntimeError("pass a repo-relative config path, for example configs/gemma4_2b/sft.yaml")
+        raise RuntimeError(
+            "pass a repo-relative config path, for example configs/gemma4_4b/sft.yaml"
+        )
     config_path = root / args.config
     if not config_path.is_file():
         raise FileNotFoundError(f"training config not found: {args.config}")
-    training_script_for_config(args.config)
+    config = load_config(config_path)
+    _validate_cloud_credentials(config)
+    _validate_cloud_adapter(config, args, root)
 
 
-def cmd_self_check(_args: argparse.Namespace) -> int:
+def cmd_self_check(args: argparse.Namespace) -> int:
     root = repo_root()
     with tempfile.TemporaryDirectory() as tmp:
         dest = Path(tmp) / REMOTE_DIRNAME
-        stage_payload(root, dest)
+        stage_payload(root, dest, args.config)
+        config = load_config(root / args.config)
+        train_file = dest / config["data"]["train_file"]
         required = [
             dest / "pyproject.toml",
             dest / "src" / "tunelm",
-            dest / "configs" / "gemma4_2b" / "smoke_sft.yaml",
+            dest / "configs" / "gemma4_4b" / "smoke_sft.yaml",
             dest / "configs" / "qwen3_06b" / "sft.yaml",
             dest / "scripts" / "jarvislabs" / "remote_setup.sh",
-            dest / "datasets" / "sft" / "sample.jsonl",
-            dest / "datasets" / "rl" / "train.jsonl",
+            train_file,
         ]
         missing = [str(path) for path in required if not path.exists()]
         if missing:
@@ -354,8 +398,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 0
         if state != "succeeded":
             raise RuntimeError(f"managed run {run_id} finished with state {state or 'unknown'}")
-        fetch_results(machine_id, remote_root, root / "results")
-        print(f"downloaded artifacts to {root / 'results'}")
+        fetch_results(machine_id, remote_root, root)
+        print(f"downloaded checkpoints/ and results/ to {root}")
     finally:
         if not args.keep and not leave_running:
             stop_instance(machine_id, destroy=args.destroy)
@@ -373,7 +417,7 @@ def provision_machine(args: argparse.Namespace, root: Path) -> str:
 def sync_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp) / REMOTE_DIRNAME
-        stage_payload(root, staging)
+        stage_payload(root, staging, args.config)
         jl(["upload", machine_id, str(staging)])
     remote_root = f"{remote_home(machine_id)}/{REMOTE_DIRNAME}"
     save_session(root, machine_id=machine_id, remote_root=remote_root)
@@ -381,6 +425,13 @@ def sync_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
         key: value
         for key in (
             "WANDB_API_KEY",
+            "WANDB_PROJECT",
+            "WANDB_ENTITY",
+            "WANDB_RUN_GROUP",
+            "WANDB_MODE",
+            "WANDB_LOG_MODEL",
+            "HF_TOKEN",
+            "HUGGING_FACE_HUB_TOKEN",
             "GEMINI_API_KEY",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
@@ -389,10 +440,11 @@ def sync_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
         )
         if (value := os.environ.get(key))
     }
+    env_values.setdefault("WANDB_PROJECT", "tunelm")
     if env_values:
         upload_env_file(machine_id, remote_root, ".remote.env", env_values)
     if not args.skip_setup:
-        setup_remote(machine_id, remote_root)
+        setup_remote(machine_id, remote_root, args.config)
     return remote_root
 
 
@@ -407,8 +459,8 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         or f"{remote_home(machine_id)}/{REMOTE_DIRNAME}"
     )
     save_session(root, machine_id=machine_id, remote_root=remote_root)
-    fetch_results(machine_id, remote_root, root / "results")
-    print(f"downloaded artifacts to {root / 'results'}")
+    fetch_results(machine_id, remote_root, root)
+    print(f"downloaded checkpoints/ and results/ to {root}")
     return 0
 
 
@@ -447,7 +499,9 @@ def build_parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="create or reuse an instance and run one training config")
     _add_on_flag(run)
     run.add_argument("--gpu", help="GPU type from `jl gpus` (for example L4 or A100)")
-    run.add_argument("--cpu", action="store_true", help="create a CPU VM instead of a GPU container")
+    run.add_argument(
+        "--cpu", action="store_true", help="create a CPU VM instead of a GPU container"
+    )
     run.add_argument("--vcpus", type=int, default=8)
     run.add_argument("--ram", type=int, default=32)
     run.add_argument("--storage", type=int, default=100)
@@ -455,8 +509,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--region", help="IN1, IN2, or EU1")
     run.add_argument(
         "--config",
-        default="configs/gemma4_2b/smoke_sft.yaml",
-        help="repo-relative SFT or GRPO config (filename must contain sft or grpo)",
+        default="configs/gemma4_4b/smoke_sft.yaml",
+        help="repo-relative SFT or GRPO config",
     )
     run.add_argument("--detach", action="store_true")
     run.add_argument("--keep", action="store_true")
@@ -474,7 +528,10 @@ def build_parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="print saved session and instance status")
     _add_on_flag(status)
 
-    commands.add_parser("self-check", help="stage a payload locally and verify required files")
+    self_check = commands.add_parser(
+        "self-check", help="stage a config-specific payload and verify required files"
+    )
+    self_check.add_argument("--config", default="configs/gemma4_4b/smoke_sft.yaml")
     return parser
 
 

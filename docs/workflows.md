@@ -86,7 +86,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[datasets/sft/train.jsonl] --> B[format_training_text<br/>messages_for_task + response]
+  A[datasets/sft/train.jsonl] --> B[training_record<br/>prompt + assistant completion]
   B --> C[Load base model + optional SFT adapter]
   C --> D[SFTTrainer / LoRA]
   D --> E[checkpoints/*-sft]

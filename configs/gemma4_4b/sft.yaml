@@ -3,7 +3,7 @@ data:
   train_file: datasets/sft/train.jsonl
 training:
   backend: transformers
-  output_dir: checkpoints/gemma4-2b-sft
+  output_dir: checkpoints/gemma4-4b-sft
   num_train_epochs: 2
   per_device_train_batch_size: 2
   gradient_accumulation_steps: 8
@@ -14,6 +14,6 @@ training:
   save_total_limit: 2
   bf16: true
   gradient_checkpointing: true
-  report_to: none
-  run_name: gemma4-2b-sft
+  report_to: wandb
+  run_name: gemma4-4b-sft
   seed: 42

@@ -238,7 +238,9 @@ def batch_regenerate_failed(config: dict[str, Any]) -> dict[str, int]:
         if sample.metadata.generation_attempts >= max_attempts:
             continue
         task = _task_from_row(row)
-        if configured_task_types(config) and task.task_type.value not in configured_task_types(config):
+        if configured_task_types(config) and task.task_type.value not in configured_task_types(
+            config
+        ):
             continue
         error = sample.metadata.validation.get("error") or "validation failed"
         repair_context = f"{error}\nPrevious answer:\n{sample.response.model_dump_json()}"

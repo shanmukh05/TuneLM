@@ -54,8 +54,6 @@ def _generation_stage(config: dict) -> str:
     return stage
 
 
-
-
 def _prompts_path(config: dict) -> Path:
     return project_path(config.get("prompts_file", "datasets/sft/prompts.jsonl"))
 

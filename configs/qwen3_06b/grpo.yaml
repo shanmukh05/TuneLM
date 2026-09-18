@@ -37,7 +37,11 @@ training:
   max_steps: 200
   logging_steps: 5
   save_steps: 50
+  save_total_limit: 2
   bf16: true
-  report_to: none
+  gradient_checkpointing: true
+  mask_truncated_completions: true
+  log_completions: true
+  report_to: wandb
   run_name: qwen3-06b-grpo
   seed: 42

@@ -6,6 +6,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+CONFIG="${1:-configs/gemma4_4b/smoke_sft.yaml}"
 cd "$ROOT"
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -18,8 +19,8 @@ if [[ ! -x .venv/bin/python ]]; then
   uv venv .venv --python 3.11 --seed
 fi
 
-uv pip install --python .venv/bin/python -e '.[train,providers,dev]'
-uv pip install --python .venv/bin/python torch bitsandbytes
+uv pip install --python .venv/bin/python -e '.[train]'
+uv pip install --python .venv/bin/python torch
 
 if command -v npm >/dev/null 2>&1; then
   npm install
@@ -31,5 +32,5 @@ fi
 if command -v nvidia-smi >/dev/null 2>&1; then
   .venv/bin/python -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)"
 fi
-.venv/bin/python scripts/train.py --config configs/gemma4_2b/smoke_sft.yaml --dry-run
+.venv/bin/python scripts/train.py --config "$CONFIG" --dry-run
 echo "remote setup ok"

@@ -1,13 +1,10 @@
 extends: model.yaml
 model:
-  adapter: checkpoints/gemma4-2b-smoke-sft
-  max_seq_length: 2048
+  adapter: checkpoints/gemma4-4b-sft
 lora:
   enabled: false
-  rank: 16
-  alpha: 32
 data:
-  train_file: datasets/rl/sample.jsonl
+  train_file: datasets/rl/train.jsonl
 strudel:
   backend: node
   timeout_seconds: 3
@@ -31,16 +28,20 @@ rewards:
     weight: 0.5
 training:
   backend: transformers
-  output_dir: checkpoints/gemma4-2b-smoke-grpo
+  output_dir: checkpoints/gemma4-4b-grpo
   per_device_train_batch_size: 1
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 8
   learning_rate: 0.000005
-  num_generations: 2
-  max_completion_length: 1024
-  max_steps: 5
-  logging_steps: 1
-  save_steps: 5
+  num_generations: 4
+  max_completion_length: 1536
+  max_steps: 200
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 2
   bf16: true
-  report_to: none
-  run_name: gemma4-2b-smoke-grpo
+  gradient_checkpointing: true
+  mask_truncated_completions: true
+  log_completions: true
+  report_to: wandb
+  run_name: gemma4-4b-grpo
   seed: 42

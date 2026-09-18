@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from functools import partial
+
 from tunelm.config import project_path
 from tunelm.experiment import write_experiment_metadata
 from tunelm.models.adapters import attach_lora
 from tunelm.models.loader import load_model_and_tokenizer
-from tunelm.models.templates import format_training_text
+from tunelm.models.templates import training_record
 
 
 def train_sft(config: dict):
@@ -18,13 +20,16 @@ def train_sft(config: dict):
     model = attach_lora(model, config)
     data_path = str(project_path(config["data"]["train_file"]))
     dataset = load_dataset("json", data_files=data_path, split="train")
-    dataset = dataset.map(lambda row: {"text": format_training_text(row, tokenizer)})
+    dataset = dataset.map(
+        partial(training_record, tokenizer=tokenizer), remove_columns=dataset.column_names
+    )
     training = config.get("training", {})
     output_dir = str(project_path(training.get("output_dir", "checkpoints/sft")))
     args = SFTConfig(
         output_dir=output_dir,
-        dataset_text_field="text",
         max_length=int(config.get("model", {}).get("max_seq_length", 4096)),
+        completion_only_loss=True,
+        packing=bool(training.get("packing", False)),
         num_train_epochs=float(training.get("num_train_epochs", 2)),
         per_device_train_batch_size=int(training.get("per_device_train_batch_size", 2)),
         gradient_accumulation_steps=int(training.get("gradient_accumulation_steps", 8)),

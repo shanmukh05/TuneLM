@@ -99,12 +99,12 @@ STYLE_SYSTEM_ADDENDA: dict[tuple[TaskType, str], str] = {
     ),
     (TaskType.EDIT, "imperative"): (
         "Task: RL edit prompt, imperative style.\n"
-        "Write a direct command (\"Add…\", \"Remove…\", \"Change…\"). "
+        'Write a direct command ("Add…", "Remove…", "Change…"). '
         "Keep the requested change exact; do not alter what must be preserved."
     ),
     (TaskType.EDIT, "conversational"): (
         "Task: RL edit prompt, conversational style.\n"
-        "Write a casual collaborator request (\"Hey, could you…\", \"Mind…\"). "
+        'Write a casual collaborator request ("Hey, could you…", "Mind…"). '
         "Keep the requested change exact; do not alter what must be preserved."
     ),
     (TaskType.REPAIR, "direct"): (

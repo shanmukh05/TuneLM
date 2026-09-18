@@ -8,7 +8,7 @@ import json
 
 from pydantic import ValidationError
 
-from tunelm.config import project_path
+from tunelm.config import load_config, project_path
 from tunelm.data.diversity import (
     benchmark_disjoint_ratio,
     check_diversity_thresholds,
@@ -17,7 +17,7 @@ from tunelm.data.diversity import (
 )
 from tunelm.io import read_jsonl
 from tunelm.schemas import ComposeTask, EditTask, RepairTask, RLTask, SFTExample, parse_task
-from tunelm.sft_data.validator import validate_solution
+from tunelm.sft_data.validator import minimum_task_consistency_score, validate_solution
 from tunelm.strudel.executor import StrudelExecutor
 
 
@@ -25,7 +25,10 @@ TASK_MODELS = {"compose": ComposeTask, "edit": EditTask, "repair": RepairTask}
 
 
 def _behavior_error(
-    value: SFTExample | RLTask, kind: str, executor: StrudelExecutor
+    value: SFTExample | RLTask,
+    kind: str,
+    executor: StrudelExecutor,
+    validation_config: dict,
 ) -> tuple[str, str] | None:
     if kind == "sft":
         payload = value.model_dump(mode="json")
@@ -33,7 +36,13 @@ def _behavior_error(
         task = task_model.model_validate(
             {key: payload[key] for key in task_model.model_fields if key in payload}
         )
-        report = validate_solution(task, value.response, executor)
+        report = validate_solution(
+            task,
+            value.response,
+            executor,
+            minimum_constraint_score=float(validation_config.get("minimum_constraint_score", 0.75)),
+            minimum_task_consistency_score=minimum_task_consistency_score(validation_config, task),
+        )
         if not report.valid:
             return "solution", report.error or "verification failed"
         return None
@@ -45,7 +54,7 @@ def _behavior_error(
 
 
 def _load_rows(
-    path: str, kind: str, executor: StrudelExecutor, check_execution: bool
+    path: str, kind: str, executor: StrudelExecutor, check_execution: bool, validation_config: dict
 ) -> tuple[list[dict], dict[str, int]]:
     rows: list[dict] = []
     counts = {"total": 0, "schema": 0, "execution": 0, "solution": 0}
@@ -58,7 +67,9 @@ def _load_rows(
             print(f"row {counts['total']}: schema error: {exc}")
             continue
         rows.append(row)
-        error = _behavior_error(value, kind, executor) if check_execution else None
+        error = (
+            _behavior_error(value, kind, executor, validation_config) if check_execution else None
+        )
         if error:
             category, message = error
             counts[category] += 1
@@ -95,10 +106,17 @@ def main() -> None:
         "--min-unique-prompts", type=float, help="Minimum disjoint ratio vs --disjoint-from"
     )
     parser.add_argument("--diversity-config", help="JSON file with diversity thresholds")
+    parser.add_argument(
+        "--validation-config",
+        help="Data-generation YAML containing SFT validation thresholds",
+    )
     args = parser.parse_args()
 
     executor = StrudelExecutor(backend=args.backend)
-    rows, counts = _load_rows(args.input, args.kind, executor, args.check_execution)
+    validation_config = load_config(args.validation_config) if args.validation_config else {}
+    rows, counts = _load_rows(
+        args.input, args.kind, executor, args.check_execution, validation_config
+    )
 
     metrics = compute_diversity_metrics(rows)
     print(json.dumps(metrics, indent=2))

@@ -22,9 +22,7 @@ from tunelm.schemas import (
 from tunelm.strudel.executor import StrudelExecutor
 
 
-RL_LLM_TASK_SYSTEM_PROMPT = (
-    "You create verifier-friendly TuneLM training tasks as JSON."
-)
+RL_LLM_TASK_SYSTEM_PROMPT = "You create verifier-friendly TuneLM training tasks as JSON."
 
 TASK_SCHEMA_HINT = """Return one JSON object for a TuneLM task with fields:
 - task_type: compose | edit | repair

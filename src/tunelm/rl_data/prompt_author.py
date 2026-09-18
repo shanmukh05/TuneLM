@@ -31,6 +31,7 @@ DEFAULT_STYLES = {
     TaskType.REPAIR: ("direct", "collaborative", "diagnostic"),
 }
 
+
 def prompt_author_config(config: dict[str, Any]) -> dict[str, Any]:
     author = config.get("prompt_author")
     if author:
@@ -56,9 +57,7 @@ def sample_style(rng: random.Random, config: dict[str, Any], task_type: TaskType
 def _compose_scene_hints(task: ComposeTask) -> list[str]:
     skip = {"procedural", "generated", "rich-compose", "prompt-llm"}
     return [
-        tag
-        for tag in task.tags
-        if tag not in skip and not tag.startswith(("style-", "level-"))
+        tag for tag in task.tags if tag not in skip and not tag.startswith(("style-", "level-"))
     ]
 
 

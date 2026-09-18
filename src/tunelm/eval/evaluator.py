@@ -23,10 +23,14 @@ def evaluate_predictions(config: dict) -> dict:
     }
     engine = RewardEngine(executor_from_config(config), weights or None)
     records = []
+    seen: set[str] = set()
     for prediction in predictions:
         task_id = prediction["task_id"]
         if task_id not in tasks:
             raise ValueError(f"Prediction references unknown task_id: {task_id}")
+        if task_id in seen:
+            raise ValueError(f"Duplicate prediction for task_id: {task_id}")
+        seen.add(task_id)
         task = tasks[task_id]
         score = engine.score(prediction["completion"], task)
         records.append(
@@ -40,6 +44,9 @@ def evaluate_predictions(config: dict) -> dict:
     output = project_path(config.get("output", "results/evaluation.jsonl"))
     write_jsonl(output, records)
     summary = aggregate(records)
+    summary["task_count"] = len(tasks)
+    summary["prediction_coverage"] = len(seen) / len(tasks) if tasks else 0.0
+    summary["missing_predictions"] = len(tasks) - len(seen)
     summary_path = output.with_suffix(".summary.json")
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary

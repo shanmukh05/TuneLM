@@ -56,7 +56,9 @@ def _batch_styled_generation_enabled(config: dict) -> bool:
 
 
 def _forbidden_signatures(config: dict, existing_rows: list[dict]) -> set[str]:
-    forbidden = load_prompt_hashes(config.get("disjoint_from")) if config.get("disjoint_from") else set()
+    forbidden = (
+        load_prompt_hashes(config.get("disjoint_from")) if config.get("disjoint_from") else set()
+    )
     for row in existing_rows:
         forbidden.add(task_signature(row))
     return forbidden
@@ -83,11 +85,7 @@ def _generate_task_specs(
             min_unique_prompts=config.get("min_unique_prompts"),
         )
         if forbidden:
-            tasks = [
-                task
-                for task in tasks
-                if task_signature(task) not in forbidden
-            ][:count]
+            tasks = [task for task in tasks if task_signature(task) not in forbidden][:count]
         prompt_router = require_prompt_router_from_config(prompt_author_config(config))
         return apply_rl_prompt_styles(
             tasks,

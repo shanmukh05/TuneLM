@@ -25,7 +25,7 @@ from tunelm.strudel.parser import ResponseParseError, extract_completion_text, p
 class RewardAdapter:
     """TRL-compatible rewards sharing an execution cache across components."""
 
-    def __init__(self, executor, max_cache_size: int = 4096) -> None:
+    def __init__(self, executor, max_cache_size: int = 128) -> None:
         self.executor = executor
         self.cache: OrderedDict[str, object] = OrderedDict()
         self.max_cache_size = max_cache_size
@@ -38,6 +38,7 @@ class RewardAdapter:
         try:
             response = parse_model_response(text)
             result = self.executor.run(response.strudel_code)
+            result = result.model_copy(update={"events": []})
         except ResponseParseError:
             result = None
         self.cache[text] = result
@@ -190,11 +191,16 @@ def train_rl(config: dict):
         max_steps=int(training.get("max_steps", 500)),
         logging_steps=int(training.get("logging_steps", 5)),
         save_steps=int(training.get("save_steps", 50)),
+        save_total_limit=int(training.get("save_total_limit", 2)),
         bf16=bool(training.get("bf16", True)),
+        gradient_checkpointing=bool(training.get("gradient_checkpointing", True)),
         report_to=training.get("report_to", "none"),
         run_name=training.get("run_name", "tunelm-grpo"),
         seed=int(training.get("seed", 42)),
         reward_weights=reward_weights,
+        chat_template_kwargs=training.get("chat_template_kwargs", {"enable_thinking": False}),
+        mask_truncated_completions=bool(training.get("mask_truncated_completions", True)),
+        log_completions=bool(training.get("log_completions", True)),
     )
     trainer = GRPOTrainer(
         model=model,

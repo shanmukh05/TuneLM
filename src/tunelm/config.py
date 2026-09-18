@@ -52,11 +52,3 @@ def project_path(value: str | Path) -> Path:
     if path.is_absolute():
         return path
     return repo_root() / path
-
-
-def training_script_for_config(path: str | Path) -> str:
-    """Return the training entrypoint for a model config filename."""
-    name = Path(path).name.lower()
-    if "grpo" in name or "sft" in name:
-        return "scripts/train.py"
-    raise ValueError(f"cannot infer training script from config name: {path}")

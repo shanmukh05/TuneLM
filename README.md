@@ -65,7 +65,7 @@ procedural tasks  →  RL JSONL   →  GRPO  →  benchmark eval
 
 1. Generate teacher-validated SFT rows (`configs/data/sft.yaml`).
 2. Generate an RL task bank with no solutions (`configs/data/rl_tasks.yaml`).
-3. Supervised-fine-tune Gemma 4 2B (default) or Qwen3 0.6B.
+3. Supervised-fine-tune Gemma 4 E4B (default) or Qwen3 0.6B.
 4. GRPO against format, execution, constraint, edit, and repair rewards.
 5. Score a fixed 500-task benchmark (`configs/data/benchmark.yaml`).
 
@@ -88,8 +88,7 @@ Install extras when needed:
 
 ```bash
 pip install -e '.[providers,train]'   # teacher APIs + SFT/GRPO
-pip install -e '.[unsloth]'           # optional loader; set training.backend: unsloth
-pip install torch bitsandbytes        # quantized GPU training
+pip install torch                     # choose the CUDA build for the training host
 ```
 
 Confirm the Strudel executor (after `npm install`):
@@ -105,7 +104,7 @@ PY
 can be checked without loading weights:
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/smoke_sft.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml --dry-run
 ```
 
 ## Generate data
@@ -136,21 +135,24 @@ Configs live under `configs/<model>/` and `extends: model.yaml`.
 
 | Model | Hugging Face id | Role |
 |-------|-----------------|------|
-| Gemma 4 2B | `google/gemma-4-E2B-it` | Default target |
+| Gemma 4 E4B | `google/gemma-4-E4B-it` | Default target; about 8B total parameters |
 | Qwen3 0.6B | `Qwen/Qwen3-0.6B` | Smaller text-only baseline |
 
 ```bash
-python scripts/train.py --config configs/gemma4_2b/sft.yaml
-python scripts/train.py --config configs/gemma4_2b/grpo.yaml
+python scripts/train.py --config configs/gemma4_4b/sft.yaml
+python scripts/train.py --config configs/gemma4_4b/grpo.yaml
 python scripts/train.py --config configs/eval/default.yaml \
-  --checkpoint checkpoints/gemma4-2b-grpo
+  --checkpoint checkpoints/gemma4-4b-grpo
 python scripts/infer.py "Create a slow piano piece with strings" \
-  --checkpoint checkpoints/gemma4-2b-grpo
+  --checkpoint checkpoints/gemma4-4b-grpo
 ```
 
 `generate.py` and `train.py` route from the YAML shape (`tunelm-generate` /
 `tunelm-train` are the same entry points). Cloud GPU: see the JarvisLabs
 section in [docs/usage.md](docs/usage.md).
+
+The current framework decision and the separate recommendation for 27B-scale
+training are documented in [docs/training-frameworks.md](docs/training-frameworks.md).
 
 Default GRPO weights: format 0.1, execution 0.4, constraints 0.5, plus 0.5 edit
 or repair consistency on those task types.

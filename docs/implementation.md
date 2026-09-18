@@ -260,7 +260,7 @@ flowchart TD
 
 Provider keys and the full cross-pipeline diagram live in [workflows.md](workflows.md).
 
-## RL task path and curriculum
+## RL task path
 
 `configs/data/rl_tasks.yaml` generates 3,000 tasks by default. When
 `prompt_author` is configured and `batch.enabled: true`, generation builds
@@ -332,10 +332,8 @@ task generation consume these files. Prompts use musician-friendly instrument
 names while model messages include the corresponding built-in, `gm_*`, or
 percussion identifier expected by Strudel.cc.
 
-Each task has a 1–5 difficulty. `curriculum_stage()` exposes only tasks whose
-difficulty is at or below the current stage; wiring stage scheduling into GRPO
-is a later experiment because the appropriate schedule depends on baseline
-results.
+Each task retains a 1–5 difficulty value for analysis and future sampling
+policies. The current trainer shuffles the complete task bank.
 
 ## Rewards
 
@@ -372,7 +370,7 @@ Reward evolution should remain experimental and additive:
 
 ## Configuration and CLI
 
-Training YAML lives under `configs/<model>/` (`gemma4_2b`, `qwen3_06b`). Each
+Training YAML lives under `configs/<model>/` (`gemma4_4b`, `qwen3_06b`). Each
 model directory has a shared `model.yaml` extended by `sft.yaml`, `grpo.yaml`,
 and smoke variants. Dataset generation configs stay under `configs/data/`.
 
@@ -389,10 +387,10 @@ JarvisLabs launches a single config via `scripts/jarvislabs/cloud_train.py
 
 ## Training
 
-`SFTTrainer` consumes a single `text` field rendered with the target tokenizer's
-chat template. `GRPOTrainer` consumes conversational prompts and custom reward
-functions. Both use a common model loader and PEFT LoRA adapter (with an optional
-Unsloth loading/adapter backend), save their
+`SFTTrainer` consumes conversational prompt-completion rows and computes loss
+only on the assistant completion. `GRPOTrainer` consumes conversational prompts
+and custom reward functions. Both use a common causal-language-model loader and
+PEFT LoRA adapter, save their
 tokenizer/checkpoint, and write `experiment.json` with the full config, runtime,
 dataset size, timestamp, and Git commit when available.
 
@@ -400,7 +398,7 @@ dataset size, timestamp, and Git commit when available.
 
 ```mermaid
 flowchart TD
-  A[datasets/sft/train.jsonl] --> B[format_training_text<br/>messages_for_task + response]
+  A[datasets/sft/train.jsonl] --> B[training_record<br/>prompt + assistant completion]
   B --> C[Load base model from configs/model.yaml]
   C --> D[Attach LoRA adapter]
   D --> E[SFTTrainer]
@@ -423,11 +421,11 @@ flowchart TD
   I --> J[experiment.json]
 ```
 
-Gemma 4 2B (`google/gemma-4-E2B-it`) is the default target. Qwen3 0.6B is the
-smaller text-only baseline. Gemma 4 uses the multimodal Transformers class
-(`AutoModelForMultimodalLM`/`AutoProcessor`) and should be smoke-tested on the
-exact GPU image before a long run. Model families can require different LoRA
-target-module names.
+Gemma 4 E4B (`google/gemma-4-E4B-it`) is the default target. It has about 8B
+total parameters and 4B effective parameters. Qwen3 0.6B is the
+smaller baseline. TuneLM is text-only, so Gemma 4 deliberately loads its causal
+language-model component rather than its unused vision/audio towers. Model
+families can require different LoRA target-module names.
 
 ### End-to-end pipeline
 
@@ -491,7 +489,7 @@ flowchart TD
 | GRPO entry point | Implemented; GPU run pending |
 | Fixed benchmark and offline evaluator | Implemented |
 | Laptop-safe config verification (`train.py --dry-run`) | Implemented |
-| Per-model config layout (`gemma4_2b`, `qwen3_06b`) | Implemented |
+| Per-model config layout (`gemma4_4b`, `qwen3_06b`) | Implemented |
 | Full audio rendering | Deferred |
 | Audio/human music preference | Deferred |
 | Adaptive weakness-driven tasks | Deferred |
