@@ -1,6 +1,9 @@
 extends: model.yaml
+model:
+  max_seq_length: 8192
 data:
   train_file: datasets/sft/train.jsonl
+  val_file: datasets/sft/val.jsonl
 training:
   backend: transformers
   output_dir: checkpoints/qwen3-06b-sft
@@ -10,10 +13,12 @@ training:
   learning_rate: 0.0002
   warmup_ratio: 0.05
   logging_steps: 10
+  eval_count: 10
   save_steps: 100
   save_total_limit: 2
   bf16: true
   gradient_checkpointing: true
   report_to: wandb
+  wandb_project: tunelm
   run_name: qwen3-06b-sft
   seed: 42

@@ -1,133 +1,32 @@
-"""Configure GRPO training and expose TRL-compatible TuneLM rewards.
+"""Configure GRPO training for TuneLM task-bank rows.
 
-`RewardAdapter` shares execution results across reward components so each model
-completion is evaluated by Strudel at most once per cache lifetime.
+Each task-bank row becomes a chat prompt plus the fixed reward columns TRL
+forwards to `RewardAdapter`. Reward logic lives in `tunelm.rewards`.
 """
 
 from __future__ import annotations
 
-from collections import OrderedDict
+import json
 
 from tunelm.config import project_path
-from tunelm.experiment import write_experiment_metadata
-from tunelm.models.adapters import attach_lora
-from tunelm.models.loader import load_model_and_tokenizer
+from tunelm.data.datasets import load_jsonl_dataset
+from tunelm.experiment import configure_wandb, write_experiment_metadata
 from tunelm.models.templates import messages_for_task
-from tunelm.rewards.constraints import has_verifiable_constraints, score_constraints
-from tunelm.rewards.edit_consistency import score_edit_consistency
-from tunelm.rewards.format import score_format
-from tunelm.rewards.repair_consistency import score_repair_consistency
-from tunelm.schemas import parse_task
-from tunelm.strudel.executor import executor_from_config
-from tunelm.strudel.parser import ResponseParseError, extract_completion_text, parse_model_response
+from tunelm.rewards.constraints import stated_constraints
+from tunelm.schemas import RLTask, parse_task
+
+# Every row carries every column (None when not applicable); Arrow cannot write
+# a mixed task bank whose rows have different keys.
+REWARD_COLUMNS = (
+    "task_type",
+    "original_code",
+    "expected_changes",
+    "preserve",
+    "reference_code",
+)
 
 
-class RewardAdapter:
-    """TRL-compatible rewards sharing an execution cache across components."""
-
-    def __init__(self, executor, max_cache_size: int = 128) -> None:
-        self.executor = executor
-        self.cache: OrderedDict[str, object] = OrderedDict()
-        self.max_cache_size = max_cache_size
-
-    def _execution(self, completion):
-        text = extract_completion_text(completion)
-        if text in self.cache:
-            self.cache.move_to_end(text)
-            return self.cache[text]
-        try:
-            response = parse_model_response(text)
-            result = self.executor.run(response.strudel_code)
-            result = result.model_copy(update={"events": []})
-        except ResponseParseError:
-            result = None
-        self.cache[text] = result
-        if len(self.cache) > self.max_cache_size:
-            self.cache.popitem(last=False)
-        return result
-
-    def format_reward(self, completions, **kwargs):
-        return [score_format(value) for value in completions]
-
-    def execution_reward(self, completions, **kwargs):
-        return [
-            float(bool((result := self._execution(value)) and result.valid))
-            for value in completions
-        ]
-
-    def constraint_reward(self, completions, constraints=None, **kwargs):
-        constraints = constraints or [{}] * len(completions)
-        output = []
-        for index, value in enumerate(completions):
-            task_constraints = constraints[index] if isinstance(constraints, list) else constraints
-            if not has_verifiable_constraints(task_constraints):
-                output.append(None)
-                continue
-            result = self._execution(value)
-            if not result or not result.valid:
-                output.append(0.0)
-                continue
-            score = score_constraints(result.features, task_constraints)
-            output.append(score)
-        return output
-
-    def edit_consistency_reward(
-        self,
-        completions,
-        original_code=None,
-        expected_changes=None,
-        preserve=None,
-        **kwargs,
-    ):
-        output = []
-        originals = original_code or [None] * len(completions)
-        changes = expected_changes or [None] * len(completions)
-        preserve_values = preserve or [[]] * len(completions)
-        for index, completion in enumerate(completions):
-            if originals[index] is None or changes[index] is None:
-                output.append(None)
-                continue
-            execution = self._execution(completion)
-            if not execution or not execution.valid:
-                output.append(0.0)
-                continue
-            try:
-                response = parse_model_response(extract_completion_text(completion))
-                task = {
-                    "id": f"reward-edit-{index}",
-                    "task_type": "edit",
-                    "prompt": "edit",
-                    "original_code": originals[index],
-                    "instruction": "edit",
-                    "expected_changes": changes[index],
-                    "preserve": preserve_values[index],
-                }
-                output.append(score_edit_consistency(response.strudel_code, task))
-            except (ResponseParseError, ValueError):
-                output.append(0.0)
-        return output
-
-    def repair_consistency_reward(self, completions, reference_code=None, **kwargs):
-        references = reference_code or [None] * len(completions)
-        output = []
-        for index, completion in enumerate(completions):
-            if references[index] is None:
-                output.append(None)
-                continue
-            execution = self._execution(completion)
-            if not execution or not execution.valid:
-                output.append(0.0)
-                continue
-            try:
-                response = parse_model_response(extract_completion_text(completion))
-                output.append(score_repair_consistency(response.strudel_code, references[index]))
-            except ResponseParseError:
-                output.append(0.0)
-        return output
-
-
-def prepare_rl_row(row: dict) -> dict:
-    """Convert a task-bank row, including Arrow's nullable union columns, to a prompt."""
+def _parse_rl_task(row: dict) -> RLTask:
     payload = dict(row)
     if "task_prompt" in payload:
         payload["prompt"] = payload.pop("task_prompt")
@@ -137,32 +36,48 @@ def prepare_rl_row(row: dict) -> dict:
         "edit": {"original_code", "instruction", "expected_changes", "preserve"},
         "repair": {"broken_code", "reference_code", "corruption"},
     }[payload["task_type"]]
-    task = parse_task(
+    return parse_task(
         {
             key: value
             for key, value in payload.items()
             if key in common | specific and value is not None
         }
     )
-    return {"prompt": messages_for_task(task)}
+
+
+def prepare_rl_row(row: dict) -> dict:
+    """Convert a task-bank row to a GRPO prompt plus uniform reward columns.
+
+    Constraints the prompt never states are dropped so the policy is only
+    rewarded for targets it can see.
+    """
+    task = _parse_rl_task(row)
+    dumped = task.model_dump(mode="json")
+    columns = {name: dumped.get(name) for name in REWARD_COLUMNS}
+    constraints = stated_constraints(task.prompt, task.constraints)
+    return {
+        **columns,
+        "constraints": constraints.model_dump(mode="json"),
+        "prompt": messages_for_task(task),
+    }
+
+
+def _prepare_rl_json_row(row: dict) -> dict:
+    return prepare_rl_row(json.loads(row["json"]))
 
 
 def train_rl(config: dict):
-    try:
-        from datasets import load_dataset
-        from trl import GRPOConfig, GRPOTrainer
-    except ImportError as exc:
-        raise RuntimeError("Install TuneLM training extras: pip install -e '.[train]'") from exc
+    from trl import GRPOConfig, GRPOTrainer
+
+    from tunelm.models.adapters import attach_lora
+    from tunelm.models.loader import load_model_and_tokenizer
+    from tunelm.rl.reward_adapter import RewardAdapter
+    from tunelm.strudel.executor import executor_from_config
 
     model, tokenizer = load_model_and_tokenizer(config)
     model = attach_lora(model, config)
-    dataset = load_dataset(
-        "json", data_files=str(project_path(config["data"]["train_file"])), split="train"
-    )
-
-    dataset = dataset.rename_column("prompt", "task_prompt")
-
-    dataset = dataset.map(prepare_rl_row)
+    dataset = load_jsonl_dataset(project_path(config["data"]["train_file"]))
+    dataset = dataset.map(_prepare_rl_json_row, remove_columns=["json"])
     rewards_config = config.get("rewards", {})
     adapter = RewardAdapter(executor_from_config(config))
     reward_funcs = []
@@ -173,6 +88,7 @@ def train_rl(config: dict):
         ("constraints", adapter.constraint_reward),
         ("edit_consistency", adapter.edit_consistency_reward),
         ("repair_consistency", adapter.repair_consistency_reward),
+        ("richness", adapter.richness_reward),
     ):
         values = rewards_config.get(name, {})
         if values.get("enabled", True):
@@ -180,6 +96,7 @@ def train_rl(config: dict):
             reward_weights.append(float(values.get("weight", 1.0)))
 
     training = config.get("training", {})
+    configure_wandb(config)
     output_dir = str(project_path(training.get("output_dir", "checkpoints/rl")))
     args = GRPOConfig(
         output_dir=output_dir,

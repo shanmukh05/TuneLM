@@ -13,6 +13,7 @@ rewards.
 |-----|----------|
 | [docs/usage.md](docs/usage.md) | Setup, generation, training, eval, JarvisLabs |
 | [docs/workflows.md](docs/workflows.md) | Staged SFT/RL diagrams |
+| [docs/training-io.md](docs/training-io.md) | Per-task SFT/GRPO inputs and shared response format |
 | [docs/implementation.md](docs/implementation.md) | Architecture and contracts |
 
 ## What the model emits

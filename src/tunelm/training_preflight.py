@@ -22,10 +22,10 @@ def require_cuda_when_requested(config: dict) -> None:
     training = config.get("training", {})
     if not training.get("bf16", True):
         return
-    try:
-        import torch
-    except ImportError:
+    if importlib.util.find_spec("torch") is None:
         return
+    import torch
+
     if torch.cuda.is_available():
         return
     raise RuntimeError(

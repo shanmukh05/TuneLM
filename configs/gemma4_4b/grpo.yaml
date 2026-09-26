@@ -5,11 +5,12 @@ lora:
   enabled: false
 data:
   train_file: datasets/rl/train.jsonl
+# 8 cycles so later sections (arrange, <...>) are executed and scored.
 strudel:
   backend: node
-  timeout_seconds: 3
-  cycles: 2
-  max_events: 2048
+  timeout_seconds: 5
+  cycles: 8
+  max_events: 8192
 rewards:
   format:
     enabled: true
@@ -26,14 +27,18 @@ rewards:
   repair_consistency:
     enabled: true
     weight: 0.5
+  richness:
+    enabled: true
+    weight: 0.2
 training:
   backend: transformers
   output_dir: checkpoints/gemma4-4b-grpo
-  per_device_train_batch_size: 1
+  # 4 x 8 = 32 completions per step = 4 prompts x 8 samples (A100-80GB).
+  per_device_train_batch_size: 4
   gradient_accumulation_steps: 8
   learning_rate: 0.000005
-  num_generations: 4
-  max_completion_length: 1536
+  num_generations: 8
+  max_completion_length: 2048
   max_steps: 200
   logging_steps: 5
   save_steps: 50
@@ -43,5 +48,6 @@ training:
   mask_truncated_completions: true
   log_completions: true
   report_to: wandb
+  wandb_project: tunelm
   run_name: gemma4-4b-grpo
   seed: 42

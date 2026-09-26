@@ -1,6 +1,5 @@
 model:
   name: Qwen/Qwen3-0.6B
-  max_seq_length: 4096
   load_in_4bit: true
   compute_dtype: bfloat16
   torch_dtype: bfloat16

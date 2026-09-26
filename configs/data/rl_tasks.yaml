@@ -19,9 +19,12 @@ llm_fraction: 0.3
 prompt_author:
   prompt_temperature: 0.9
   prompt_max_tokens: 4096
+  # `brief` states tempo/instruments/layers so the constraint reward has visible
+  # targets; scene/musician stay vague and are scored on execution + richness.
   compose_styles:
     - scene
     - musician
+    - brief
   edit_styles:
     - imperative
     - conversational

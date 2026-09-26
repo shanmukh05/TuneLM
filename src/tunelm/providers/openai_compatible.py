@@ -6,6 +6,8 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
+from openai import OpenAI
+
 from tunelm.providers.base import LLMProvider, Message
 
 
@@ -22,10 +24,6 @@ class ChatCompletionsProvider(LLMProvider):
         api_key_env: str,
         default_headers: dict[str, str] | None = None,
     ) -> None:
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise RuntimeError("Install provider extras: pip install -e '.[providers]'") from exc
         self.name = name
         self.model = model
         key = api_key or os.getenv(api_key_env)

@@ -130,14 +130,22 @@ task but is not scored until a defensible audio or embedding verifier exists.
   unavailable. It does not hide ordinary Strudel execution errors.
 
 The analyzer extracts explicit BPM from `setcpm`/`setcps`, instrument/sample
-names, note names, a conservative layer count, drum density, used functions,
-and event count. Static feature extraction is intentionally explainable and
-forms the first constraint baseline.
+names, note names, a layer count, drum density, used functions, event count,
+and two temporal features: `active_cycles` (cycles with an audible onset) and
+`distinct_cycles` (distinct per-cycle event patterns). When the Node executor
+returns events, `instruments` comes from audible events (not muted by
+`gain(0)`), so names in dead code do not count; without events (static backend,
+edit/repair comparisons) it falls back to string arguments in the source.
+`layer_count` is the widest `stack(...)` argument count, or 1 without `stack`.
+`ExecutionResult.playable` means the code executed and produced events; the
+static backend cannot count events and is treated as playable.
 
 The current `@strudel/core` package imports `@kabelsalat/web` from an ESM entry
 point that its package metadata does not select under Node. The npm postinstall
-script switches that installed dependency to its published `dist/index.mjs`.
-It does not modify TuneLM source or fetch a fork.
+script at `scripts/strudel/patch-kabelsalat.mjs` switches that installed
+dependency to its published `dist/index.mjs`. It fails on an unexpected
+dependency version rather than silently starting training with a broken
+verifier. It does not modify TuneLM source or fetch a fork.
 
 ### Security boundary
 
@@ -266,10 +274,12 @@ Provider keys and the full cross-pipeline diagram live in [workflows.md](workflo
 `prompt_author` is configured and `batch.enabled: true`, generation builds
 procedural skeletons first, then batch-rewrites musician-facing prompts with a
 random per-row style
-(compose: scene/musician; edit: imperative/conversational; repair:
-direct/collaborative/diagnostic). The prompt author sees scene hints only, not
-constraint JSON. Verifier fields stay on the task; edit tasks keep `instruction`
-for rewards.
+(compose: scene/musician/brief; edit: imperative/conversational; repair:
+direct/collaborative/diagnostic). For `scene` and `musician` the prompt author
+sees scene hints only, not constraint JSON. The `brief` style also receives the
+tempo, instruments, forbidden instruments, and minimum layers and must state
+them, so the constraint reward has visible targets. Verifier fields stay on the
+task; edit tasks keep `instruction` for rewards.
 
 RL `stage` mirrors SFT review flow:
 
@@ -342,20 +352,30 @@ Rewards are independent Python functions/classes:
 | Component | Current meaning |
 |---|---|
 | Format | Completion validates against the exact response schema |
-| Execution | Strudel produces a queryable pattern without an error |
-| Constraints | Mean satisfaction across explicit tempo, instrument, and layer constraints |
+| Execution | Strudel produces a queryable pattern without an error **and** at least one event (playable) |
+| Constraints | Mean satisfaction across explicit tempo, instrument, and layer constraints that the prompt states |
 | Edit consistency | Requested directional changes plus equality of named preserved features |
 | Repair consistency | Equality of tempo, instruments, notes, layer count, and drum density to the valid reference |
+| Richness (compose) | Mean of cycle coverage and per-cycle variation over the queried cycles (`rewards/richness.py`) |
 
 `RewardEngine` provides a normalized weighted score for offline evaluation.
 `RewardAdapter` exposes the same logic in TRL-compatible callables and shares an
 LRU-like execution cache so the execution and constraint rewards do not execute
 the same completion twice. Non-edit rows return `None` from the edit reward so
 TRL can ignore that reward for those samples. Constraint applicability is decided
-from the task, not the completion: tasks without supported explicit constraints
-always return `None`, while invalid completions for constrained tasks receive zero.
-Edit and repair consistency also receive zero when the candidate does not execute,
-so structural similarity cannot reward an unchanged broken program.
+from the task, not the completion: `stated_constraints(prompt, constraints)`
+first drops targets the prompt never states (no "N BPM", instrument not named,
+no explicit layer count), then tasks without remaining constraints return
+`None`, while unplayable completions for constrained tasks receive zero. SFT
+teacher validation still records hidden constraints for reporting only.
+Edit, repair, and richness also receive zero when the candidate is not playable,
+so structural similarity cannot reward an unchanged broken or silent program.
+Richness returns `None` for edit/repair rows and for the static backend, which
+cannot produce events.
+
+Known limits: prompt-mention matching is keyword-based and can keep a
+constraint on an incidental word; richness is a proxy that random functions
+can inflate, so its weight stays small until an audio or judge reward exists.
 
 The checked-in SFT smoke fixture passes execution, constraint, plan/code, and
 edit/repair-consistency verification. SFT validation with `--check-execution`
@@ -389,7 +409,9 @@ JarvisLabs launches a single config via `scripts/jarvislabs/cloud_train.py
 
 `SFTTrainer` consumes conversational prompt-completion rows and computes loss
 only on the assistant completion. `GRPOTrainer` consumes conversational prompts
-and custom reward functions. Both use a common causal-language-model loader and
+and custom reward functions; every RL row carries the same reward columns
+(`null` where not applicable) so mixed compose/edit/repair banks load into
+Arrow. Both use a common causal-language-model loader and
 PEFT LoRA adapter, save their
 tokenizer/checkpoint, and write `experiment.json` with the full config, runtime,
 dataset size, timestamp, and Git commit when available.

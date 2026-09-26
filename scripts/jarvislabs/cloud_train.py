@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -102,9 +103,17 @@ def stage_payload(root: Path, dest: Path, config_path: str) -> None:
     shutil.copytree(root / "scripts", dest / "scripts")
     config = load_config(root / config_path)
     _copy_into_payload(root, dest, config["data"]["train_file"])
+    val_file = config.get("data", {}).get("val_file")
+    if val_file:
+        _copy_into_payload(root, dest, val_file)
     adapter = config.get("model", {}).get("adapter")
     if adapter and (root / adapter).exists():
         _copy_into_payload(root, dest, adapter)
+    training = config.get("training", {})
+    if training.get("resume_from_checkpoint"):
+        output_dir = training.get("output_dir")
+        if output_dir and (root / output_dir).is_dir():
+            _copy_into_payload(root, dest, output_dir)
     for name in ("pyproject.toml", "package.json", "package-lock.json", "README.md"):
         source = root / name
         if source.is_file():
@@ -149,25 +158,6 @@ def jl_json(args: list[str]) -> Any:
     return payload
 
 
-def require_ssh_identity() -> None:
-    candidates = [Path.home() / ".ssh" / name for name in ("id_ed25519", "id_rsa", "id_ecdsa")]
-    existing = [path for path in candidates if path.is_file()]
-    if not existing:
-        raise RuntimeError(
-            "no ~/.ssh/id_ed25519 or id_rsa; generate a key and run jl ssh-key add <key>.pub"
-        )
-    listed = subprocess.run(["ssh-add", "-l"], capture_output=True, text=True)
-    if listed.returncode == 0:
-        return
-    locked = [
-        path
-        for path in existing
-        if b"ENCRYPTED" in path.read_bytes()[:120] or b"aes256" in path.read_bytes()[:120]
-    ]
-    if locked:
-        raise RuntimeError(f"unlock your SSH key first: ssh-add {locked[0]}")
-
-
 def require_jl() -> None:
     if shutil.which("jl") is None:
         raise RuntimeError(
@@ -206,7 +196,7 @@ def create_instance(args: argparse.Namespace) -> str:
     create = ["create", "--storage", str(args.storage), "--name", args.name, "--yes"]
     if args.region:
         create.extend(["--region", args.region])
-    if args.cpu:
+    if getattr(args, "cpu", False):
         create.extend(["--vm", "--cpu", "--vcpus", str(args.vcpus), "--ram", str(args.ram)])
     else:
         create.extend(["--gpu", args.gpu, "--template", "pytorch"])
@@ -291,9 +281,217 @@ def run_state(run_id: str) -> str:
     return str(payload.get("state") or payload.get("status") or "").lower()
 
 
+def _checkpoint_eval_loss(checkpoint_dir: Path) -> float | None:
+    state_path = checkpoint_dir / "trainer_state.json"
+    if not state_path.is_file():
+        return None
+    log_history = json.loads(state_path.read_text(encoding="utf-8")).get("log_history") or []
+    losses = [float(entry["eval_loss"]) for entry in log_history if "eval_loss" in entry]
+    return losses[-1] if losses else None
+
+
+def _checkpoint_train_loss(checkpoint_dir: Path) -> float | None:
+    state_path = checkpoint_dir / "trainer_state.json"
+    if not state_path.is_file():
+        return None
+    log_history = json.loads(state_path.read_text(encoding="utf-8")).get("log_history") or []
+    losses = [float(entry["loss"]) for entry in log_history if "loss" in entry]
+    return min(losses) if losses else None
+
+
+def _is_adapter_dir(path: Path) -> bool:
+    return path.is_dir() and (path / "adapter_config.json").is_file()
+
+
+def _checkpoint_step(path: Path) -> int | None:
+    if path.name.startswith("checkpoint-"):
+        return int(path.name.split("-", 1)[1])
+    return None
+
+
+def promote_best_checkpoint(root: Path, config: dict) -> Path:
+    """Copy the lowest eval-loss checkpoint (or train-loss fallback) into results/."""
+    training = config.get("training", {})
+    output_rel = str(training.get("output_dir", "checkpoints/sft"))
+    output_dir = (root / output_rel).resolve()
+    run_name = str(training.get("run_name") or Path(output_rel).name)
+    dest = root / "results" / run_name / "best"
+    if dest.exists():
+        shutil.rmtree(dest)
+
+    candidates = sorted(output_dir.glob("checkpoint-*"), key=lambda path: path.name)
+    best_source: Path | None = None
+    best_eval_loss: float | None = None
+    best_train_loss: float | None = None
+    for checkpoint in candidates:
+        eval_loss = _checkpoint_eval_loss(checkpoint)
+        if eval_loss is not None and (best_eval_loss is None or eval_loss < best_eval_loss):
+            best_eval_loss = eval_loss
+            best_source = checkpoint
+            continue
+        train_loss = _checkpoint_train_loss(checkpoint)
+        if best_eval_loss is None and train_loss is not None and (
+            best_train_loss is None or train_loss < best_train_loss
+        ):
+            best_train_loss = train_loss
+            best_source = checkpoint
+
+    if best_source is None and _is_adapter_dir(output_dir):
+        best_source = output_dir
+    if best_source is None:
+        raise RuntimeError(f"no adapter checkpoint found under {output_rel}")
+
+    shutil.copytree(best_source, dest)
+    manifest = {
+        "run_name": run_name,
+        "source": str(best_source.relative_to(root)),
+        "destination": str(dest.relative_to(root)),
+        "best_eval_loss": best_eval_loss,
+        "best_train_loss": best_train_loss if best_eval_loss is None else _checkpoint_train_loss(best_source),
+    }
+    manifest_path = root / "results" / run_name / "best_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return dest
+
+
+def _load_best_manifest(root: Path, run_name: str) -> dict[str, Any]:
+    path = root / "results" / run_name / "best_manifest.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"best manifest not found: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"invalid best manifest: {path}")
+    return payload
+
+
+def _final_checkpoint(root: Path, output_rel: str) -> Path | None:
+    output_dir = (root / output_rel).resolve()
+    checkpoints = sorted(output_dir.glob("checkpoint-*"), key=lambda path: path.name)
+    if not checkpoints:
+        return output_dir if _is_adapter_dir(output_dir) else None
+    return max(checkpoints, key=lambda path: _checkpoint_step(path) or -1)
+
+
+def resolve_publish_targets(args: argparse.Namespace, root: Path) -> list[dict[str, Any]]:
+    if args.scope == "single":
+        if not args.adapter:
+            raise RuntimeError("pass --adapter for --scope single")
+        adapter = (root / args.adapter).resolve()
+        if not _is_adapter_dir(adapter):
+            raise FileNotFoundError(f"adapter directory not found: {args.adapter}")
+        return [
+            {
+                "adapter": str(adapter.relative_to(root)),
+                "tag": args.tag,
+                "step": args.step or _checkpoint_step(adapter),
+                "eval_loss": args.eval_loss,
+                "run_name": args.run_name or adapter.parent.name,
+            }
+        ]
+
+    config_path = args.config
+    if not config_path:
+        session = load_session(root)
+        config_path = session.get("config")
+    if not config_path:
+        raise RuntimeError("pass --config or run training first so the session stores a config")
+    if not (root / config_path).is_file():
+        raise FileNotFoundError(f"training config not found: {config_path}")
+    config = load_config(root / config_path)
+    training = config.get("training", {})
+    run_name = args.run_name or str(training.get("run_name") or Path(training.get("output_dir", "checkpoints/sft")).name)
+    manifest = _load_best_manifest(root, run_name)
+    best_adapter = root / str(manifest["destination"])
+    if not _is_adapter_dir(best_adapter):
+        raise FileNotFoundError(f"best adapter not found: {manifest['destination']}")
+    best_source = root / str(manifest["source"])
+    targets = [
+        {
+            "adapter": str(best_adapter.relative_to(root)),
+            "tag": "best",
+            "step": _checkpoint_step(best_source),
+            "eval_loss": manifest.get("best_eval_loss"),
+            "run_name": run_name,
+        }
+    ]
+    final_source = _final_checkpoint(root, str(training.get("output_dir", f"checkpoints/{run_name}")))
+    if final_source is None:
+        raise RuntimeError(f"no final checkpoint found for run {run_name}")
+    if final_source.resolve() != best_source.resolve():
+        targets.append(
+            {
+                "adapter": str(final_source.relative_to(root)),
+                "tag": "final",
+                "step": _checkpoint_step(final_source),
+                "eval_loss": _checkpoint_eval_loss(final_source),
+                "run_name": run_name,
+            }
+        )
+    return targets
+
+
+def stage_publish_payload(root: Path, dest: Path, adapter_paths: list[str]) -> None:
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    shutil.copytree(root / "src", dest / "src", ignore=_ignore)
+    shutil.copytree(root / "scripts", dest / "scripts")
+    for name in ("pyproject.toml", "README.md"):
+        source = root / name
+        if source.is_file():
+            shutil.copy2(source, dest / name)
+    for adapter in adapter_paths:
+        _copy_into_payload(root, dest, adapter)
+
+
+def append_published_manifest(root: Path, records: list[dict[str, Any]]) -> Path:
+    path = root / "results" / "published_models.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return path
+
+
+def remote_publish_shell(remote_root: str, target: dict[str, Any], *, repo_id: str | None) -> str:
+    command = [
+        ".venv/bin/python",
+        "scripts/jarvislabs/publish_model.py",
+        "--adapter",
+        target["adapter"],
+        "--run-name",
+        str(target["run_name"]),
+    ]
+    if target.get("tag"):
+        command.extend(["--tag", str(target["tag"])])
+    if target.get("step") is not None:
+        command.extend(["--step", str(target["step"])])
+    if target.get("eval_loss") is not None:
+        command.extend(["--eval-loss", str(target["eval_loss"])])
+    if repo_id:
+        command.extend(["--repo-id", repo_id])
+    quoted = " ".join(shlex.quote(part) for part in command)
+    return (
+        f"set -euo pipefail; cd {shlex.quote(remote_root)}; "
+        "if [ -f .remote.env ]; then set -a; . ./.remote.env; set +a; fi; "
+        f"{quoted}"
+    )
+
+
 def fetch_results(machine_id: str, remote_root: str, root: Path) -> None:
     jl(["download", machine_id, f"{remote_root}/checkpoints", str(root), "-r"])
     jl(["download", machine_id, f"{remote_root}/results", str(root), "-r"])
+
+
+def fetch_and_finalize(
+    machine_id: str, remote_root: str, root: Path, config: dict
+) -> Path:
+    fetch_results(machine_id, remote_root, root)
+    best = promote_best_checkpoint(root, config)
+    if not best.is_dir() or not (best / "adapter_config.json").is_file():
+        raise RuntimeError(f"best checkpoint download incomplete: {best}")
+    return best
 
 
 def stop_instance(machine_id: str, *, destroy: bool) -> None:
@@ -316,10 +514,6 @@ def _validate_cloud_credentials(config: dict) -> None:
     report_to = config.get("training", {}).get("report_to")
     if report_to == "wandb" and not os.environ.get("WANDB_API_KEY"):
         raise RuntimeError("WANDB_API_KEY is required because training.report_to=wandb")
-    model_name = str(config.get("model", {}).get("name", ""))
-    has_hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-    if model_name.startswith("google/gemma") and not has_hf_token:
-        raise RuntimeError("HF_TOKEN is required to download Gemma on a fresh instance")
 
 
 def _validate_cloud_adapter(config: dict, args: argparse.Namespace, root: Path) -> None:
@@ -330,9 +524,20 @@ def _validate_cloud_adapter(config: dict, args: argparse.Namespace, root: Path) 
         )
 
 
+def _validate_resume_checkpoint(config: dict, root: Path) -> None:
+    training = config.get("training", {})
+    resume = training.get("resume_from_checkpoint")
+    if not resume:
+        return
+    checkpoint = (root / resume).resolve()
+    if not checkpoint.is_dir() or not (checkpoint / "trainer_state.json").is_file():
+        raise FileNotFoundError(
+            f"resume checkpoint not found or incomplete: {resume}. "
+            "Fetch or copy the checkpoint locally before resuming."
+        )
+
+
 def validate_run(args: argparse.Namespace, root: Path) -> None:
-    if not args.machine_id and not args.gpu and not args.cpu:
-        raise RuntimeError("pass --gpu TYPE, --cpu, or --on MACHINE_ID")
     if Path(args.config).is_absolute():
         raise RuntimeError(
             "pass a repo-relative config path, for example configs/gemma4_4b/sft.yaml"
@@ -343,6 +548,7 @@ def validate_run(args: argparse.Namespace, root: Path) -> None:
     config = load_config(config_path)
     _validate_cloud_credentials(config)
     _validate_cloud_adapter(config, args, root)
+    _validate_resume_checkpoint(config, root)
 
 
 def cmd_self_check(args: argparse.Namespace) -> int:
@@ -369,12 +575,13 @@ def cmd_self_check(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     require_jl()
-    require_ssh_identity()
     root = repo_root()
     load_local_env(root)
     validate_run(args, root)
+    config = load_config(root / args.config)
     machine_id = provision_machine(args, root)
     leave_running = False
+    safe_to_destroy = False
     try:
         remote_root = sync_code(machine_id, root, args)
         run_id = start_train(machine_id, remote_root, args.config)
@@ -396,14 +603,23 @@ def cmd_run(args: argparse.Namespace) -> int:
             leave_running = True
             print(f"detached; training still running on {machine_id} as {run_id}")
             return 0
+        if state == "failed":
+            try:
+                fetch_results(machine_id, remote_root, root)
+                print(f"downloaded partial checkpoints/ and results/ to {root}")
+            except RuntimeError as error:
+                print(f"partial fetch failed: {error}", file=sys.stderr)
+            raise RuntimeError(f"managed run {run_id} finished with state {state or 'unknown'}")
         if state != "succeeded":
             raise RuntimeError(f"managed run {run_id} finished with state {state or 'unknown'}")
-        fetch_results(machine_id, remote_root, root)
-        print(f"downloaded checkpoints/ and results/ to {root}")
+        best = fetch_and_finalize(machine_id, remote_root, root, config)
+        print(f"downloaded checkpoints/ and best checkpoint to {best}")
+        safe_to_destroy = True
     finally:
         if not args.keep and not leave_running:
-            stop_instance(machine_id, destroy=args.destroy)
-            print(f"instance {machine_id} {'destroyed' if args.destroy else 'paused'}")
+            destroy = args.destroy and safe_to_destroy
+            stop_instance(machine_id, destroy=destroy)
+            print(f"instance {machine_id} {'destroyed' if destroy else 'paused'}")
     return 0
 
 
@@ -415,12 +631,16 @@ def provision_machine(args: argparse.Namespace, root: Path) -> str:
 
 
 def sync_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
+    home = remote_home(machine_id)
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp) / REMOTE_DIRNAME
         stage_payload(root, staging, args.config)
-        jl(["upload", machine_id, str(staging)])
-    remote_root = f"{remote_home(machine_id)}/{REMOTE_DIRNAME}"
+        # Upload into HOME, not an existing tunelm directory: scp would nest it.
+        jl(["upload", machine_id, str(staging), home])
+    remote_root = f"{home}/{REMOTE_DIRNAME}"
     save_session(root, machine_id=machine_id, remote_root=remote_root)
+    config = load_config(root / args.config)
+    training = config.get("training", {})
     env_values = {
         key: value
         for key in (
@@ -432,15 +652,10 @@ def sync_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
             "WANDB_LOG_MODEL",
             "HF_TOKEN",
             "HUGGING_FACE_HUB_TOKEN",
-            "GEMINI_API_KEY",
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "OPENROUTER_API_KEY",
-            "DEEPSEEK_API_KEY",
         )
         if (value := os.environ.get(key))
     }
-    env_values.setdefault("WANDB_PROJECT", "tunelm")
+    env_values.setdefault("WANDB_PROJECT", training.get("wandb_project", "tunelm"))
     if env_values:
         upload_env_file(machine_id, remote_root, ".remote.env", env_values)
     if not args.skip_setup:
@@ -451,6 +666,7 @@ def sync_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
 def cmd_fetch(args: argparse.Namespace) -> int:
     require_jl()
     root = repo_root()
+    load_local_env(root)
     machine_id = ensure_running(resolve_machine_id(args, root))
     session = load_session(root)
     remote_root = (
@@ -458,9 +674,13 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         or session.get("remote_root")
         or f"{remote_home(machine_id)}/{REMOTE_DIRNAME}"
     )
-    save_session(root, machine_id=machine_id, remote_root=remote_root)
-    fetch_results(machine_id, remote_root, root)
-    print(f"downloaded checkpoints/ and results/ to {root}")
+    config_path = args.config or session.get("config")
+    if not config_path:
+        raise RuntimeError("pass --config or run `cloud_train.py run` first")
+    config = load_config(root / config_path)
+    save_session(root, machine_id=machine_id, remote_root=remote_root, config=config_path)
+    best = fetch_and_finalize(machine_id, remote_root, root, config)
+    print(f"downloaded checkpoints/ and best checkpoint to {best}")
     return 0
 
 
@@ -488,6 +708,83 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_publish(args: argparse.Namespace) -> int:
+    require_jl()
+    root = repo_root()
+    load_local_env(root)
+    if not os.environ.get("HF_TOKEN") and not os.environ.get("HUGGING_FACE_HUB_TOKEN"):
+        raise RuntimeError("HF_TOKEN is required to publish merged models to Hugging Face")
+    targets = resolve_publish_targets(args, root)
+    machine_id = provision_machine(args, root)
+    published: list[dict[str, Any]] = []
+    try:
+        remote_root = sync_publish_code(machine_id, root, targets, args)
+        for target in targets:
+            shell = remote_publish_shell(remote_root, target, repo_id=args.repo_id)
+            completed = jl(
+                ["exec", machine_id, "--", "bash", "-lc", shell],
+                capture=True,
+            )
+            stdout = (completed.stdout or "").strip()
+            if not stdout:
+                raise RuntimeError(f"publish produced no output for {target['adapter']}")
+            payload = json.loads(stdout)
+            if not isinstance(payload, dict) or not payload.get("repo_id"):
+                raise RuntimeError(f"unexpected publish output for {target['adapter']}: {stdout}")
+            payload["published_at"] = datetime.now(UTC).isoformat()
+            published.append(payload)
+            print(json.dumps(payload, indent=2))
+        manifest_path = append_published_manifest(root, published)
+        print(f"recorded publish manifest at {manifest_path}")
+    finally:
+        if not args.keep:
+            destroy = args.destroy and bool(published)
+            stop_instance(machine_id, destroy=destroy)
+            print(f"instance {machine_id} {'destroyed' if destroy else 'paused'}")
+    return 0
+
+
+def setup_publish_remote(machine_id: str, remote_root: str) -> None:
+    shell = (
+        f"set -euo pipefail; cd {shlex.quote(remote_root)}; "
+        "if ! command -v uv >/dev/null 2>&1; then "
+        "curl -LsSf https://astral.sh/uv/install.sh | sh; "
+        'export PATH="${HOME}/.local/bin:${PATH}"; fi; '
+        "uv python install 3.11; "
+        "if [[ ! -x .venv/bin/python ]]; then uv venv .venv --python 3.11 --seed; fi; "
+        "uv pip install --python .venv/bin/python -e '.[train]' torch; "
+        ".venv/bin/python -c \"import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)\""
+    )
+    jl(["exec", machine_id, "--", "bash", "-lc", shell])
+
+
+def sync_publish_code(
+    machine_id: str, root: Path, targets: list[dict[str, Any]], args: argparse.Namespace
+) -> str:
+    home = remote_home(machine_id)
+    adapter_paths = sorted({str(target["adapter"]) for target in targets})
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = Path(tmp) / REMOTE_DIRNAME
+        stage_publish_payload(root, staging, adapter_paths)
+        jl(["upload", machine_id, str(staging), home])
+    remote_root = f"{home}/{REMOTE_DIRNAME}"
+    save_session(root, machine_id=machine_id, remote_root=remote_root)
+    env_values = {
+        key: value
+        for key in (
+            "HF_TOKEN",
+            "HUGGING_FACE_HUB_TOKEN",
+            "HF_USERNAME",
+        )
+        if (value := os.environ.get(key))
+    }
+    if env_values:
+        upload_env_file(machine_id, remote_root, ".remote.env", env_values)
+    if not args.skip_setup:
+        setup_publish_remote(machine_id, remote_root)
+    return remote_root
+
+
 def _add_on_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--on", dest="machine_id", help="existing JarvisLabs machine id")
 
@@ -498,7 +795,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = commands.add_parser("run", help="create or reuse an instance and run one training config")
     _add_on_flag(run)
-    run.add_argument("--gpu", help="GPU type from `jl gpus` (for example L4 or A100)")
+    run.add_argument(
+        "--gpu",
+        default="A100-80GB",
+        help="GPU type from `jl gpus` (default: A100-80GB)",
+    )
     run.add_argument(
         "--cpu", action="store_true", help="create a CPU VM instead of a GPU container"
     )
@@ -520,6 +821,10 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = commands.add_parser("fetch", help="download remote checkpoints/results")
     _add_on_flag(fetch)
     fetch.add_argument("--remote-root")
+    fetch.add_argument(
+        "--config",
+        help="repo-relative training config (defaults to saved session config)",
+    )
 
     down = commands.add_parser("down", help="pause or destroy the instance")
     _add_on_flag(down)
@@ -527,6 +832,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = commands.add_parser("status", help="print saved session and instance status")
     _add_on_flag(status)
+
+    publish = commands.add_parser(
+        "publish", help="merge adapters on JarvisLabs and push merged models to Hugging Face"
+    )
+    _add_on_flag(publish)
+    publish.add_argument(
+        "--scope",
+        choices=("single", "best-and-final"),
+        default="best-and-final",
+        help="publish one adapter or the best and final checkpoints (default: best-and-final)",
+    )
+    publish.add_argument("--adapter", help="repo-relative adapter path for --scope single")
+    publish.add_argument("--run-name", help="training run name for auto repo ids")
+    publish.add_argument(
+        "--config",
+        help="repo-relative training config used to locate checkpoints (defaults to saved session config)",
+    )
+    publish.add_argument("--step", type=int, help="training step for --scope single")
+    publish.add_argument("--tag", choices=("best", "final"), help="checkpoint tag for --scope single")
+    publish.add_argument("--eval-loss", type=float, help="eval loss recorded on the model card")
+    publish.add_argument("--repo-id", help="override HF repo id (single publish only)")
+    publish.add_argument("--gpu", default="A100-80GB")
+    publish.add_argument("--storage", type=int, default=100)
+    publish.add_argument("--name", default="tunelm-publish")
+    publish.add_argument("--region")
+    publish.add_argument("--keep", action="store_true")
+    publish.add_argument("--destroy", action="store_true")
+    publish.add_argument("--skip-setup", action="store_true")
 
     self_check = commands.add_parser(
         "self-check", help="stage a config-specific payload and verify required files"
@@ -543,6 +876,7 @@ def main(argv: list[str] | None = None) -> int:
         "fetch": cmd_fetch,
         "down": cmd_down,
         "status": cmd_status,
+        "publish": cmd_publish,
     }
     try:
         return commands[args.command](args)

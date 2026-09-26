@@ -6,10 +6,56 @@ embedding verifier for them.
 
 from __future__ import annotations
 
+import re
+from itertools import pairwise
 from typing import Any
 
 from tunelm.schemas import TaskConstraints, TempoRange
-from tunelm.strudel.analyzer import DRUM_NAMES, canonical_instrument
+from tunelm.strudel.analyzer import DRUM_NAMES, canonical_instrument, instruments_satisfy
+
+BPM_MENTION = re.compile(r"\b\d{2,3}(?:\.\d+)?\s*(?:bpm|beats per minute)\b", re.IGNORECASE)
+LAYER_COUNT_MENTION = re.compile(
+    r"\b(?:\d+|one|two|three|four|five|six|seven|eight)\s+(?:\w+\s+)?layers?\b", re.IGNORECASE
+)
+
+
+def _prompt_terms(prompt: str) -> set[str]:
+    """Words, hyphen/joined bigrams, and singular forms that may name an instrument."""
+    words = re.findall(r"[a-z][a-z0-9_]*", prompt.casefold())
+    terms = set(words)
+    for first, second in pairwise(words):
+        terms.update({f"{first}-{second}", f"{first}{second}"})
+    terms.update({term[:-1] for term in list(terms) if term.endswith("s")})
+    return terms
+
+
+def stated_constraints(prompt: str, constraints: TaskConstraints | dict) -> TaskConstraints:
+    """Keep only constraints the prompt actually states.
+
+    Styled RL prompts are deliberately vague, so hidden tempo or instrument
+    targets would reward guessing rather than instruction following.
+    ponytail: keyword matching can keep a constraint on an incidental word
+    ("a car ride"); an LLM extractor is the upgrade if that shows up in logs.
+    """
+    if not isinstance(constraints, TaskConstraints):
+        constraints = TaskConstraints.model_validate(constraints or {})
+    terms = _prompt_terms(prompt)
+    mentions_layers = bool(LAYER_COUNT_MENTION.search(prompt))
+    return constraints.model_copy(
+        update={
+            "tempo": constraints.tempo if BPM_MENTION.search(prompt) else None,
+            "required_instruments": [
+                name for name in constraints.required_instruments if instruments_satisfy(name, terms)
+            ],
+            "forbidden_instruments": [
+                name
+                for name in constraints.forbidden_instruments
+                if instruments_satisfy(name, terms)
+            ],
+            "min_layers": constraints.min_layers if mentions_layers else None,
+            "max_layers": constraints.max_layers if mentions_layers else None,
+        }
+    )
 
 
 def has_verifiable_constraints(constraints: TaskConstraints | dict) -> bool:

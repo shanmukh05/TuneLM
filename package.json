@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-or-later",
   "engines": { "node": ">=18" },
   "scripts": {
-    "postinstall": "node scripts/patch-kabelsalat.mjs"
+    "postinstall": "node scripts/strudel/patch-kabelsalat.mjs"
   },
   "dependencies": {
     "@strudel/core": "1.2.6",

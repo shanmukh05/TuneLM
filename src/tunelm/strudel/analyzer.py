@@ -6,6 +6,7 @@ fast, deterministic analysis shared by data generation and rewards.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
@@ -109,33 +110,113 @@ def infer_tempo(code: str) -> float | None:
     return float(cps.group(1)) * 240 if cps else None
 
 
+def _strip_comments(code: str) -> str:
+    code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", "", code)
+
+
+def _call_arity(code: str, open_index: int) -> int:
+    """Count top-level arguments of the call whose `(` sits at `open_index`."""
+    depth = 0
+    commas = 0
+    quote: str | None = None
+    escaped = False
+    last = ""
+    for char in code[open_index:]:
+        if quote:
+            quote, escaped = _advance_quote(char, quote, escaped)
+            continue
+        if char in QUOTES:
+            quote = char
+        elif char in DELIMITER_PAIRS:
+            depth += 1
+        elif char in DELIMITER_PAIRS.values():
+            depth -= 1
+            if depth == 0:
+                return 0 if last == "(" else commas + (last != ",")
+        elif char == "," and depth == 1:
+            commas += 1
+        if not char.isspace():
+            last = char
+    return commas + 1
+
+
+def _layer_count(code: str) -> int:
+    """Widest `stack(...)` argument count; a program without `stack` is one layer."""
+    stripped = _strip_comments(code)
+    arities = [
+        _call_arity(stripped, match.end() - 1)
+        for match in re.finditer(r"\bstack\s*\(", stripped)
+    ]
+    if arities:
+        return max(arities)
+    return 1 if code.strip() else 0
+
+
+def _audible_onsets(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Events that start in the queried window and are not muted with gain 0."""
+    return [
+        event
+        for event in events
+        if event.get("onset") is not False
+        and isinstance(event.get("value"), dict)
+        and event["value"].get("gain", 1) != 0
+    ]
+
+
+def _cycle_features(onsets: list[dict[str, Any]]) -> tuple[int, int]:
+    """Return (cycles with sound, distinct per-cycle event patterns)."""
+    per_cycle: dict[int, list[tuple[float, str]]] = {}
+    for event in onsets:
+        begin = event.get("begin")
+        if begin is None:
+            continue
+        cycle = math.floor(begin)
+        signature = (round(begin - cycle, 4), json.dumps(event["value"], sort_keys=True))
+        per_cycle.setdefault(cycle, []).append(signature)
+    distinct = {tuple(sorted(items)) for items in per_cycle.values()}
+    return len(per_cycle), len(distinct)
+
+
 def analyze_code(code: str, events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Extract verifier features from source, preferring executed events when present.
+
+    With events, `instruments` lists only sounds that actually play (dead code and
+    `gain(0)` layers do not count). Without events (static backend, edit/repair
+    comparisons) it falls back to string arguments in the source.
+    """
     sample_strings = _string_arguments(code, SAMPLE_CALLS)
     sample_tokens = [token for notation in sample_strings for token in _tokens(notation)]
     quoted_notes = _string_arguments(code, ("note", "n"))
     note_tokens = [token for notation in quoted_notes for token in _tokens(notation)]
-    instruments = sorted(set(sample_tokens))
     drum_hits = sum(sample_tokens.count(name) for name in DRUM_NAMES)
     multipliers = [int(value) for value in re.findall(r"\*\s*(\d+)", " ".join(sample_strings))]
     drum_density = drum_hits * math.prod(multipliers[:1]) if drum_hits else 0
 
-    layer_count = 1 if code.strip() else 0
-    stack = re.search(r"\bstack\s*\(", code)
-    if stack:
-        # Static, conservative estimate; the executor's event stream remains the
-        # source of truth for temporal metrics.
-        layer_count = max(2, len(sample_strings), len(quoted_notes))
+    onsets = _audible_onsets(events or [])
+    if events:
+        instruments = sorted(
+            {
+                canonical_instrument(str(event["value"]["s"]).split(":", 1)[0])
+                for event in onsets
+                if event["value"].get("s")
+            }
+        )
+    else:
+        instruments = sorted(set(sample_tokens))
+    active_cycles, distinct_cycles = _cycle_features(onsets)
 
-    event_values = [event.get("value") for event in events or []]
     return {
         "tempo": infer_tempo(code),
         "instruments": instruments,
         "sample_counts": dict(Counter(sample_tokens)),
         "notes": note_tokens,
-        "layer_count": layer_count,
+        "layer_count": _layer_count(code),
         "drum_density": drum_density,
         "event_count": len(events or []),
-        "event_values": event_values,
+        "event_values": [event.get("value") for event in events or []],
+        "active_cycles": active_cycles,
+        "distinct_cycles": distinct_cycles,
         "functions": sorted(set(re.findall(r"\.?\b([A-Za-z_$][\w$]*)\s*\(", code))),
     }
 
@@ -151,8 +232,7 @@ def _advance_quote(char: str, quote: str, escaped: bool) -> tuple[str | None, bo
 
 
 def _delimiter_error(code: str) -> str | None:
-    code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
-    code = re.sub(r"//[^\n]*", "", code)
+    code = _strip_comments(code)
     stack: list[str] = []
     quote: str | None = None
     escaped = False

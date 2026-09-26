@@ -1,7 +1,9 @@
 """Combine TuneLM reward components for offline evaluation.
 
-Trainer-facing adapters live in `tunelm.rl.trainer`; this module owns the single
-normalized score used by evaluation and local diagnostics.
+Trainer-facing adapters live in `tunelm.rl.reward_adapter`; this module owns the
+single normalized score used by evaluation and local diagnostics. Both apply the
+same rules: only prompt-stated constraints count, and downstream components
+require a playable (executing, non-silent) program.
 """
 
 from __future__ import annotations
@@ -9,11 +11,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from tunelm.rewards.constraints import has_verifiable_constraints, score_constraints
+from tunelm.rewards.constraints import (
+    has_verifiable_constraints,
+    score_constraints,
+    stated_constraints,
+)
 from tunelm.rewards.edit_consistency import score_edit_consistency
 from tunelm.rewards.format import score_format
 from tunelm.rewards.repair_consistency import score_repair_consistency
-from tunelm.schemas import EditTask, RepairTask, RLTask
+from tunelm.rewards.richness import score_richness
+from tunelm.schemas import ComposeTask, EditTask, ExecutionResult, RepairTask, RLTask
 from tunelm.strudel.executor import StrudelExecutor
 from tunelm.strudel.parser import ResponseParseError, extract_completion_text, parse_model_response
 
@@ -37,28 +44,28 @@ class RewardEngine:
             "constraints": 0.5,
             "edit_consistency": 0.5,
             "repair_consistency": 0.5,
+            "richness": 0.2,
         }
 
     def score(self, completion: Any, task: RLTask) -> RewardResult:
         components = {"format": score_format(completion)}
-        constraints_apply = has_verifiable_constraints(task.constraints)
+        constraints = stated_constraints(task.prompt, task.constraints)
         result = None
-        candidate_code = None
         try:
             response = parse_model_response(extract_completion_text(completion))
         except ResponseParseError:
-            pass
+            response = None
         else:
             result = self.executor.run(response.strudel_code)
-            candidate_code = response.strudel_code if result.valid else None
-        components["execution"] = float(bool(result and result.valid))
-        if constraints_apply:
+        playable = result if result is not None and result.playable else None
+        candidate_code = response.strudel_code if playable else None
+        components["execution"] = float(playable is not None)
+        if has_verifiable_constraints(constraints):
             components["constraints"] = (
-                score_constraints(result.features, task.constraints)
-                if result and result.valid
-                else 0.0
+                score_constraints(playable.features, constraints) if playable else 0.0
             )
         components.update(_consistency_components(task, candidate_code))
+        components.update(self._richness_component(task, playable))
         active_weight = sum(self.weights.get(name, 0.0) for name in components)
         total = (
             sum(score * self.weights.get(name, 0.0) for name, score in components.items())
@@ -67,6 +74,17 @@ class RewardEngine:
             else 0.0
         )
         return RewardResult(total=total, components=components)
+
+    def _richness_component(
+        self, task: RLTask, playable: ExecutionResult | None
+    ) -> dict[str, float]:
+        if not isinstance(task, ComposeTask):
+            return {}
+        if playable is None:
+            return {"richness": 0.0}
+        if playable.backend == "static":
+            return {}
+        return {"richness": score_richness(playable.features, self.executor.cycles)}
 
 
 def _consistency_components(task: RLTask, candidate_code: str | None) -> dict[str, float]:

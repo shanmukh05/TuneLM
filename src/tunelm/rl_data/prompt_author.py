@@ -12,9 +12,18 @@ import random
 from typing import Any
 
 from tunelm.data.generation_progress import GenerationProgress
+from tunelm.data.vocab import load_vocab
 from tunelm.providers.base import ProviderRouter
 from tunelm.providers.provenance import provider_provenance
-from tunelm.schemas import ComposeTask, EditTask, ModelProvenance, RepairTask, RLTask, TaskType
+from tunelm.schemas import (
+    ComposeTask,
+    EditTask,
+    ModelProvenance,
+    RepairTask,
+    RLTask,
+    TaskType,
+    TempoRange,
+)
 from tunelm.models.prompt_author_templates import task_style_system_prompt
 from tunelm.strudel.parser import ResponseParseError, parse_json_object
 
@@ -26,7 +35,7 @@ PROMPT_RESPONSE_SCHEMA = {
 }
 
 DEFAULT_STYLES = {
-    TaskType.COMPOSE: ("scene", "musician"),
+    TaskType.COMPOSE: ("scene", "musician", "brief"),
     TaskType.EDIT: ("imperative", "conversational"),
     TaskType.REPAIR: ("direct", "collaborative", "diagnostic"),
 }
@@ -61,8 +70,35 @@ def _compose_scene_hints(task: ComposeTask) -> list[str]:
     ]
 
 
-def task_author_payload(task: RLTask) -> dict[str, Any]:
-    """Hints for prompt authoring only; verifier fields stay on the task object."""
+def _friendly_instrument(name: str) -> str:
+    """Musician word for a canonical sound id (`cp` -> `clap`) so prompts avoid Strudel ids."""
+    for alias, target in load_vocab().instrument_aliases.items():
+        if target == name and not alias.startswith("gm_"):
+            return alias
+    return name
+
+
+def _brief_constraint_hints(task: ComposeTask) -> dict[str, Any]:
+    """Explicit targets for the `brief` style; `stated_constraints` keeps what it mentions."""
+    constraints = task.constraints
+    hints: dict[str, Any] = {}
+    if isinstance(constraints.tempo, TempoRange):
+        hints["tempo_bpm"] = round((constraints.tempo.min + constraints.tempo.max) / 2)
+    elif constraints.tempo is not None:
+        hints["tempo_bpm"] = round(constraints.tempo)
+    if constraints.required_instruments:
+        hints["instruments"] = [_friendly_instrument(n) for n in constraints.required_instruments]
+    if constraints.forbidden_instruments:
+        hints["avoid_instruments"] = [
+            _friendly_instrument(n) for n in constraints.forbidden_instruments
+        ]
+    if constraints.min_layers is not None:
+        hints["min_layers"] = constraints.min_layers
+    return hints
+
+
+def task_author_payload(task: RLTask, style: str | None = None) -> dict[str, Any]:
+    """Hints for prompt authoring; verifier targets are exposed only for the `brief` style."""
     payload: dict[str, Any] = {"task_type": task.task_type.value}
     if isinstance(task, ComposeTask):
         payload["difficulty"] = task.difficulty
@@ -71,6 +107,8 @@ def task_author_payload(task: RLTask) -> dict[str, Any]:
         scene_hints = _compose_scene_hints(task)
         if scene_hints:
             payload["scene_hints"] = scene_hints[:5]
+        if style == "brief":
+            payload.update(_brief_constraint_hints(task))
         return payload
     if isinstance(task, EditTask):
         payload["instruction"] = task.instruction
@@ -95,7 +133,7 @@ def author_task_prompt(
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": json.dumps(task_author_payload(task), ensure_ascii=False),
+            "content": json.dumps(task_author_payload(task, style), ensure_ascii=False),
         },
     ]
     last_error: Exception | None = None

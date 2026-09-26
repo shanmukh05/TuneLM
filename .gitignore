@@ -18,6 +18,7 @@ datasets/sft/*.jsonl
 datasets/rl/*.jsonl
 !datasets/rl/sample.jsonl
 datasets/evaluation/*.jsonl
+datasets/docs/training-frameworks.md
 wandb/
 .cursor/
 design_docs/

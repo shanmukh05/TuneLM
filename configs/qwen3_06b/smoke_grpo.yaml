@@ -1,7 +1,6 @@
 extends: model.yaml
 model:
   adapter: checkpoints/qwen3-06b-smoke-sft
-  max_seq_length: 2048
 lora:
   enabled: false
   rank: 16
@@ -29,6 +28,9 @@ rewards:
   repair_consistency:
     enabled: true
     weight: 0.5
+  richness:
+    enabled: true
+    weight: 0.2
 training:
   backend: transformers
   output_dir: checkpoints/qwen3-06b-smoke-grpo

@@ -6,24 +6,23 @@ import json
 from pathlib import Path
 from typing import Any
 
+import torch
+from peft import AutoPeftModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from tunelm.inference_limits import DEFAULT_MAX_NEW_TOKENS
 from tunelm.models.templates import SYSTEM_PROMPT, render_generation_prompt
 from tunelm.strudel.executor import StrudelExecutor
 from tunelm.strudel.parser import parse_model_response
 
 
 def load_checkpoint(checkpoint: str):
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-    except ImportError as exc:
-        raise RuntimeError("Install TuneLM training extras: pip install -e '.[train]'") from exc
     tokenizer = AutoTokenizer.from_pretrained(
         checkpoint, trust_remote_code=False, padding_side="left"
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     if (Path(checkpoint) / "adapter_config.json").exists():
-        from peft import AutoPeftModelForCausalLM
-
         model = AutoPeftModelForCausalLM.from_pretrained(
             checkpoint, device_map="auto", dtype="auto", trust_remote_code=False
         )
@@ -45,11 +44,9 @@ def generate_messages(
     model,
     tokenizer,
     *,
-    max_new_tokens: int = 1536,
+    max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
     temperature: float = 0.7,
 ) -> str:
-    import torch
-
     text = render_generation_prompt(messages, tokenizer)
     inputs = tokenizer(text, return_tensors="pt").to(_input_device(model))
     generation = {
@@ -67,7 +64,7 @@ def generate(
     prompt: str,
     checkpoint: str,
     *,
-    max_new_tokens: int = 1536,
+    max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
     temperature: float = 0.7,
     validate: bool = True,
 ) -> dict[str, Any]:

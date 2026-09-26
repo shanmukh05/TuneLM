@@ -22,11 +22,17 @@ fi
 uv pip install --python .venv/bin/python -e '.[train]'
 uv pip install --python .venv/bin/python torch
 
-if command -v npm >/dev/null 2>&1; then
-  npm install
-else
-  echo "warning: npm not found; Strudel node backend may be unavailable"
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 ||
+   ! node -e 'if (Number(process.versions.node.split(".")[0]) < 18) process.exit(1)'; then
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Node.js/npm is required; install Node 22 before training" >&2
+    exit 1
+  fi
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y nodejs
 fi
+node -e 'if (Number(process.versions.node.split(".")[0]) < 18) process.exit(1)'
+npm ci
 
 .venv/bin/python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
 if command -v nvidia-smi >/dev/null 2>&1; then

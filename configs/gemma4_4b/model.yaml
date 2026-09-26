@@ -1,6 +1,5 @@
 model:
   name: google/gemma-4-E4B-it
-  max_seq_length: 4096
   load_in_4bit: true
   compute_dtype: bfloat16
   torch_dtype: bfloat16

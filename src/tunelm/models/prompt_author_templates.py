@@ -97,6 +97,18 @@ STYLE_SYSTEM_ADDENDA: dict[tuple[TaskType, str], str] = {
         "Frame the ask as music for a moment, location, or on-screen situation.\n"
         f"{VAGUE_COMPOSE_RULES}"
     ),
+    (TaskType.COMPOSE, "brief"): (
+        "Task: RL compose prompt, brief style.\n"
+        "This style OVERRIDES the compose vagueness rules above. Write one short "
+        "sentence like a user typing a quick request, e.g. \"Funky clap and slap bass "
+        "groove around 105 BPM, at least 3 layers.\" You MUST:\n"
+        "- state tempo_bpm as a number followed by \"BPM\" when it is given;\n"
+        "- name every entry in `instruments` in plain words (plurals are fine);\n"
+        "- say \"no <instrument>\" for every entry in `avoid_instruments`;\n"
+        "- say \"at least N layers\" when min_layers is given.\n"
+        "Add a genre or mood word from the hints. Never use Strudel identifiers "
+        "such as gm_* names."
+    ),
     (TaskType.EDIT, "imperative"): (
         "Task: RL edit prompt, imperative style.\n"
         'Write a direct command ("Add…", "Remove…", "Change…"). '

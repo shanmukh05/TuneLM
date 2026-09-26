@@ -1,6 +1,6 @@
 extends: model.yaml
 model:
-  max_seq_length: 2048
+  max_seq_length: 4096
 lora:
   rank: 16
   alpha: 32

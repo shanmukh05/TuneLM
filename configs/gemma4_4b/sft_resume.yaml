@@ -1,0 +1,7 @@
+extends: sft.yaml
+training:
+  num_train_epochs: 6
+  resume_from_checkpoint: checkpoints/gemma4-4b-sft/checkpoint-1008
+  learning_rate: 0.00005
+  eval_count: 30
+  run_name: gemma4-4b-sft

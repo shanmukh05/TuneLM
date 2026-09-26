@@ -5,6 +5,8 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
+from anthropic import Anthropic
+
 from tunelm.providers.base import LLMProvider, Message
 
 
@@ -12,10 +14,6 @@ class AnthropicProvider(LLMProvider):
     name = "anthropic"
 
     def __init__(self, model: str, api_key: str | None = None) -> None:
-        try:
-            from anthropic import Anthropic
-        except ImportError as exc:
-            raise RuntimeError("Install provider extras: pip install -e '.[providers]'") from exc
         self.model = model
         self.client = Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
 

@@ -4,6 +4,9 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
+from google import genai
+from google.genai import types
+
 from tunelm.providers.base import LLMProvider, Message
 
 
@@ -11,10 +14,6 @@ class GeminiProvider(LLMProvider):
     name = "gemini"
 
     def __init__(self, model: str, api_key: str | None = None) -> None:
-        try:
-            from google import genai
-        except ImportError as exc:
-            raise RuntimeError("Install provider extras: pip install -e '.[providers]'") from exc
         self.model = model
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
 
@@ -26,8 +25,6 @@ class GeminiProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int = 2048,
     ) -> str:
-        from google.genai import types
-
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         contents = [
             types.Content(

@@ -53,7 +53,9 @@ def plan_rl_styled_prompts(
                         },
                         {
                             "role": "user",
-                            "content": json.dumps(task_author_payload(task), ensure_ascii=False),
+                            "content": json.dumps(
+                                task_author_payload(task, style), ensure_ascii=False
+                            ),
                         },
                     ],
                     response_schema=PROMPT_RESPONSE_SCHEMA,

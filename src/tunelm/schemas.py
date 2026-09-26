@@ -185,6 +185,11 @@ class ExecutionResult(StrictModel):
     backend: str = "unknown"
     duration_ms: float = 0.0
 
+    @property
+    def playable(self) -> bool:
+        """Executed and produced sound; static checks cannot count events, so they pass."""
+        return self.valid and (self.backend == "static" or bool(self.features.get("event_count")))
+
 
 def parse_task(value: dict[str, Any]) -> RLTask:
     task_type = value.get("task_type")

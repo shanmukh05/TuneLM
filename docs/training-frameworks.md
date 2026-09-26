@@ -8,13 +8,28 @@ checkpoints.
 
 | Scale | SFT | RL | Why |
 |---|---|---|---|
-| Current 0.6B–2B models | TRL `SFTTrainer` + PEFT | TRL `GRPOTrainer` + PEFT | Smallest maintained stack that accepts conversational data and in-process custom rewards. |
+| Current Qwen 0.6B and Gemma 4 E4B | TRL `SFTTrainer` + PEFT | TRL `GRPOTrainer` + PEFT | Smallest maintained stack that accepts conversational data and in-process custom rewards. |
 | Qwen3.8-27B SFT | Axolotl + PEFT/QLoRA, after an architecture smoke | — | Better operational FSDP2/DeepSpeed, preprocessing, masking checks, and checkpoint controls at this scale. |
 | Qwen3.8-27B, serious RL | — | prime-rl or verl | Both separate fast rollout inference from distributed training; this is the point where the single-process TRL path stops being the right production architecture. |
 
 PEFT is the adapter implementation, not the overall training framework. Keeping
 TRL for the present models therefore does not mean PEFT was selected as the
 framework.
+
+The repository currently uses **TRL + PEFT, not Unsloth + TRL**. Unsloth now
+supports Gemma 4 E4B SFT and RL and reports faster training and lower VRAM
+than its comparison setup. It still changes model loading, LoRA setup, and
+Gemma-specific kernels, so it is not an installation-only acceleration switch.
+For the first TuneLM run, keep TRL + PEFT to establish a correct baseline and
+measure throughput. If the 8,192-token SFT run is too slow or too memory-heavy,
+benchmark Unsloth + TRL on the *same* sample, compare loss and Strudel eval,
+and migrate only after adapter save/load and GRPO reward parity are proven.
+Current Transformers versions must include the upstream Gemma 4
+`use_cache=False` fix; a short forward/backward smoke should check for finite,
+plausible loss before a paid full run.
+
+- [Unsloth Gemma 4 training guide](https://unsloth.ai/docs/models/gemma-4/train)
+- [Upstream Gemma 4 cache bug and fix](https://github.com/huggingface/transformers/issues/45242)
 
 ## Why not migrate now
 

@@ -6,8 +6,9 @@ generation:
   max_new_tokens: 1536
 strudel:
   backend: node
-  timeout_seconds: 3
-  cycles: 2
+  timeout_seconds: 5
+  cycles: 8
+  max_events: 8192
 rewards:
   format:
     enabled: true
@@ -24,3 +25,6 @@ rewards:
   repair_consistency:
     enabled: true
     weight: 0.5
+  richness:
+    enabled: true
+    weight: 0.2

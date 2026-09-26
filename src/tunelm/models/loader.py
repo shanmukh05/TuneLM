@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import torch
+from peft import PeftModel, prepare_model_for_kbit_training
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
 from tunelm.config import project_path
 
 
-def _quantization_config(model_cfg: dict[str, Any], torch, config_class):
+def _quantization_config(model_cfg: dict[str, Any], config_class):
     if not model_cfg.get("load_in_4bit", False):
         return None
     return config_class(
@@ -22,10 +26,6 @@ def _attach_adapter(model, model_cfg: dict[str, Any], for_training: bool):
     adapter = model_cfg.get("adapter")
     if not adapter:
         return model
-    try:
-        from peft import PeftModel, prepare_model_for_kbit_training
-    except ImportError as exc:
-        raise RuntimeError("Install TuneLM training extras: pip install -e '.[train]'") from exc
     if for_training and getattr(model, "is_loaded_in_4bit", False):
         model = prepare_model_for_kbit_training(model)
     adapter_path = project_path(adapter)
@@ -36,14 +36,8 @@ def _attach_adapter(model, model_cfg: dict[str, Any], for_training: bool):
 
 
 def _load_transformers(model_cfg: dict[str, Any], for_training: bool):
-    try:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-    except ImportError as exc:
-        raise RuntimeError("Install TuneLM training extras: pip install -e '.[train]'") from exc
-
     name = model_cfg["name"]
-    quantization = _quantization_config(model_cfg, torch, BitsAndBytesConfig)
+    quantization = _quantization_config(model_cfg, BitsAndBytesConfig)
     tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=False, padding_side="right")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token

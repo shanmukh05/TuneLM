@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from google import genai
+
 from tunelm.providers.base import Message
 
 _COMPLETED_STATES = frozenset(
@@ -150,10 +152,6 @@ class GeminiBatchClient:
     """Submit, poll, and collect Gemini batch generateContent jobs."""
 
     def __init__(self, model: str, api_key: str | None = None) -> None:
-        try:
-            from google import genai
-        except ImportError as exc:
-            raise RuntimeError("Install provider extras: pip install -e '.[providers]'") from exc
         self.model = model
         self.client = genai.Client(api_key=api_key)
 

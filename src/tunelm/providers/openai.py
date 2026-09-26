@@ -7,6 +7,8 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
+from openai import BadRequestError, OpenAI
+
 from tunelm.providers.base import LLMProvider, Message
 
 
@@ -50,10 +52,6 @@ class OpenAIProvider(LLMProvider):
     name = "openai"
 
     def __init__(self, model: str, api_key: str | None = None) -> None:
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise RuntimeError("Install provider extras: pip install -e '.[providers]'") from exc
         self.model = model
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
 
@@ -79,8 +77,6 @@ class OpenAIProvider(LLMProvider):
                     "schema": openai_strict_json_schema(response_schema),
                 }
             }
-
-        from openai import BadRequestError
 
         attempts = (
             {**kwargs, "temperature": temperature},

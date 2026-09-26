@@ -24,12 +24,13 @@ train = [
   "accelerate>=1.12,<2",
   "bitsandbytes>=0.49,<1",
   "datasets>=4.4,<5",
-  "peft>=0.18,<1",
+  "peft>=0.19,<1",
   "transformers>=5.8,<6",
   "trl>=0.29,<0.30",
   "wandb>=0.25,<1",
 ]
 dev = ["pytest>=8.0", "ruff>=0.9"]
+modal = ["modal>=0.73", "huggingface_hub", "fastapi[standard]"]
 
 [project.scripts]
 tunelm-generate = "tunelm.cli:generate_main"
