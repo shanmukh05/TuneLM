@@ -20,7 +20,7 @@ from tunelm.providers.gemini_batch import BatchRequest
 from tunelm.schemas import ModelProvenance, ModelResponse, SFTExample, parse_task
 from tunelm.sft_data.example_builder import build_sft_sample
 from tunelm.sft_data.task_planner import plan_sft_tasks, tasks_from_prompt_results
-from tunelm.sft_data.validator import minimum_task_consistency_score, validate_solution
+from tunelm.sft_data.validator import validate_solution, validation_options
 from tunelm.strudel.executor import executor_from_config
 from tunelm.strudel.parser import parse_model_response
 
@@ -198,8 +198,7 @@ def batch_validate_samples(config: dict[str, Any]) -> dict[str, int]:
             task,
             sample.response,
             executor,
-            minimum_constraint_score=float(config.get("minimum_constraint_score", 0.75)),
-            minimum_task_consistency_score=minimum_task_consistency_score(config, task),
+            **validation_options(config, task),
         )
         metadata = sample.metadata.model_copy(
             update={"valid": report.valid, "validation": report.as_dict()}

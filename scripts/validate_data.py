@@ -17,7 +17,7 @@ from tunelm.data.diversity import (
 )
 from tunelm.io import read_jsonl
 from tunelm.schemas import ComposeTask, EditTask, RepairTask, RLTask, SFTExample, parse_task
-from tunelm.sft_data.validator import minimum_task_consistency_score, validate_solution
+from tunelm.sft_data.validator import validate_solution, validation_options
 from tunelm.strudel.executor import StrudelExecutor
 
 
@@ -40,8 +40,7 @@ def _behavior_error(
             task,
             value.response,
             executor,
-            minimum_constraint_score=float(validation_config.get("minimum_constraint_score", 0.75)),
-            minimum_task_consistency_score=minimum_task_consistency_score(validation_config, task),
+            **validation_options(validation_config, task),
         )
         if not report.valid:
             return "solution", report.error or "verification failed"

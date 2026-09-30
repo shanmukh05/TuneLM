@@ -50,12 +50,31 @@ def run_train(
     *,
     dry_run: bool = False,
     checkpoint: str | None = None,
+    revision: str | None = None,
     limit: int | None = None,
+    predictions: str | None = None,
+    output: str | None = None,
+    tasks: str | None = None,
+    temperature: float | None = None,
+    max_new_tokens: int | None = None,
+    mode: str | None = None,
 ) -> None:
     if dry_run and checkpoint:
         raise ValueError("--dry-run cannot be combined with --checkpoint")
 
     config = load_config(config_path)
+    if predictions:
+        config["predictions"] = predictions
+    if output:
+        config["output"] = output
+    if tasks:
+        config["tasks"] = tasks
+    if temperature is not None:
+        config.setdefault("generation", {})["temperature"] = temperature
+    if max_new_tokens is not None:
+        config.setdefault("generation", {})["max_new_tokens"] = max_new_tokens
+    if mode is not None:
+        config.setdefault("generation", {})["mode"] = mode
     kind = infer_train_kind(config)
 
     if dry_run:
@@ -93,6 +112,8 @@ def run_train(
                 temperature=float(config.get("generation", {}).get("temperature", 0.0)),
                 max_new_tokens=int(config.get("generation", {}).get("max_new_tokens", 1536)),
                 limit=limit,
+                mode=config.get("generation", {}).get("mode", "combined"),
+                revision=revision,
             )
             print(f"generated {count} predictions")
         from tunelm.eval.evaluator import evaluate_predictions
@@ -133,11 +154,25 @@ def train_main(argv: list[str] | None = None) -> None:
         help="validate config and dataset paths without loading model weights",
     )
     parser.add_argument("--checkpoint", help="evaluate: generate predictions before scoring")
+    parser.add_argument("--revision", help="evaluate: Hugging Face branch, tag, or commit")
     parser.add_argument("--limit", type=int, help="evaluate: only generate this many predictions")
+    parser.add_argument("--predictions", help="evaluate: score an existing predictions JSONL")
+    parser.add_argument("--output", help="evaluate: write results and review CSV here")
+    parser.add_argument("--tasks", help="evaluate: score against this task JSONL")
+    parser.add_argument("--temperature", type=float, help="evaluate: generation temperature")
+    parser.add_argument("--max-new-tokens", type=int, help="evaluate: completion token limit")
+    parser.add_argument("--mode", choices=["combined", "code-first"], help="evaluate: inference mode")
     args = parser.parse_args(argv)
     run_train(
         args.config,
         dry_run=args.dry_run,
         checkpoint=args.checkpoint,
+        revision=args.revision,
         limit=args.limit,
+        predictions=args.predictions,
+        output=args.output,
+        tasks=args.tasks,
+        temperature=args.temperature,
+        max_new_tokens=args.max_new_tokens,
+        mode=args.mode,
     )

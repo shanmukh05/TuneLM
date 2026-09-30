@@ -15,34 +15,12 @@ from typing import Any
 
 from tunelm.inference_limits import DEFAULT_MAX_NEW_TOKENS
 from tunelm.io import read_jsonl, write_jsonl
+from tunelm.eval.manual_prompts import MANUAL_PROMPTS
 from tunelm.models.templates import task_from_example, task_user_prompt
+from tunelm.strudel.executor import StrudelExecutor
 
 DEFAULT_SAMPLES = "datasets/sft/sample.jsonl"
 DEFAULT_OUTPUT = "results/modal_inference_best_new.jsonl"
-
-# Default manual batch for Modal sample generation (compose prompts only).
-MANUAL_PROMPTS: list[str] = [
-    "Give me a stadium rock groove inspired by We Will Rock You with stomps, claps, and a heavy guitar riff.",
-    "Make something that feels like the Interstellar soundtrack with dreamy synths and slow arpeggios.",
-    "I want a funky disco track similar in feel to Stayin' Alive.",
-    "Compose a dark sci-fi theme inspired by Dune with tribal percussion and deep drones.",
-    "Play a cheerful Happy Birthday style melody with bells, piano, and light drums.",
-    "Can you make an 80s synth-pop track reminiscent of Take On Me?",
-    "Write an energetic piano-rock anthem with the feel of Don't Stop Me Now.",
-    "Give me a tight pop groove inspired by Billie Jean with a strong bassline and crisp drums.",
-    "Make an epic Indian cinematic theme with the scale and energy of Baahubali.",
-    "I want a Latin-pop groove with the rhythmic feel of Despacito and warm percussion.",
-    "A calm and peaceful track for watching the sunset after a long day.",
-    "Something energetic and uplifting for a morning workout with punchy drums and a driving bassline.",
-    "A melancholic late-night melody using soft piano, warm pads, and distant strings.",
-    "Mix Indian percussion with electronic synths to make a modern, rhythmic fusion track.",
-    "A mysterious soundtrack for exploring an abandoned city at night.",
-    "Make something that starts sad and emotional but gradually becomes hopeful and triumphant.",
-    "A funky groove built around bass guitar, cowbell, saxophone, and crisp drums.",
-    "Combine lo-fi hip-hop with jazz using Rhodes piano, soft drums, upright bass, and saxophone.",
-    "A dreamy space-themed track with arpeggiated synths, ambient pads, and a slow cinematic build.",
-    "An intense battle theme mixing tribal drums, orchestral brass, distorted synth bass, and fast percussion."
-]
 
 TRAIN_NULL_FIELDS = (
     "original_code",
@@ -95,6 +73,11 @@ def train_row_from_inference(
     row["response"] = response if response is not None else model_output
 
     metadata = dict(row.get("metadata") or {})
+    for key in (
+        "teacher", "teacher_provider", "teacher_model", "valid", "validation",
+        "generation_attempts", "created_at",
+    ):
+        metadata.pop(key, None)
     metadata.update(
         {
             "inference_source": "modal",
@@ -196,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-new-tokens", type=int, default=DEFAULT_MAX_NEW_TOKENS)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--validate", action="store_true")
+    parser.add_argument("--compile-retries", type=int, default=2)
     parser.add_argument("--timeout", type=int, default=600)
     args = parser.parse_args(argv)
 
@@ -206,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     results: list[dict[str, Any]] = []
+    executor = StrudelExecutor(backend="node", cycles=8, timeout_seconds=5, max_events=8192)
     for index, (source, user_prompt) in enumerate(jobs, start=1):
         label = (source or {}).get("id") or f"prompt-{index}"
         print(f"[{index}/{len(jobs)}] {label}", file=sys.stderr)
@@ -226,6 +211,30 @@ def main(argv: list[str] | None = None) -> int:
             print(error, file=sys.stderr)
             return 1
 
+        attempts = 1
+        while True:
+            response = model_response(model_output)
+            execution = executor.run(response["strudel_code"]) if response is not None else None
+            if (execution is not None and execution.playable) or attempts > args.compile_retries:
+                break
+            error = execution.error if execution is not None else model_output.get("detail", "invalid JSON")
+            repair_prompt = (
+                f"{user_prompt}\n\nYour previous response failed Strudel validation: "
+                f"{str(error)[:600]}\nReturn the complete corrected JSON response."
+            )
+            try:
+                model_output = call_endpoint(
+                    args.url,
+                    repair_prompt,
+                    max_new_tokens=args.max_new_tokens,
+                    temperature=min(args.temperature, 0.2),
+                    validate=False,
+                    timeout=args.timeout,
+                )
+            except urllib.error.URLError as error:
+                model_output = {"detail": str(error)}
+            attempts += 1
+
         row = train_row_from_inference(
             source,
             prompt=user_prompt,
@@ -233,6 +242,10 @@ def main(argv: list[str] | None = None) -> int:
             index=index,
             endpoint=args.url,
         )
+        row["metadata"]["inference_attempts"] = attempts
+        row["metadata"]["valid"] = bool(execution is not None and execution.playable)
+        if execution is not None:
+            row["metadata"]["validation"] = execution.model_dump()
         results.append(row)
         code = ""
         response = row.get("response")

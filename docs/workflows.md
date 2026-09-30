@@ -125,11 +125,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[datasets/rl/train.jsonl] --> B[prepare_rl_row<br/>messages_for_task<br/>uniform reward columns<br/>prompt-stated constraints]
-  B --> C[Load SFT checkpoint + LoRA]
+  A[datasets/rl/quality_train.jsonl] --> B[prepare_rl_row<br/>messages_for_task<br/>uniform reward columns<br/>prompt-stated constraints]
+  B --> C[Load merged SFT model from Hugging Face + new LoRA]
   C --> D[GRPOTrainer<br/>num_generations per prompt]
   D --> E[Sample N completions from policy]
-  E --> F[RewardAdapter<br/>format · playable execution · constraints<br/>edit/repair consistency · compose richness]
+  E --> F[RewardAdapter<br/>format · playable execution · response consistency<br/>constraints · edit/repair · compose form]
   F --> G[Strudel executor cache]
   G --> H[Group-relative advantage + update]
   H --> I[checkpoints/*-grpo]

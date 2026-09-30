@@ -1,0 +1,10 @@
+extends: rl_tasks.yaml
+output: datasets/rl/generated_quality_train.jsonl
+prompts_file: datasets/rl/generated_quality_prompts.jsonl
+append: false
+prompt_author:
+  compose_styles:
+    - brief
+    - brief
+    - scene
+    - musician

@@ -19,7 +19,8 @@ from tunelm.rewards.constraints import (
 from tunelm.rewards.edit_consistency import score_edit_consistency
 from tunelm.rewards.format import score_format
 from tunelm.rewards.repair_consistency import score_repair_consistency
-from tunelm.rewards.richness import score_richness
+from tunelm.rewards.response_consistency import score_response_consistency
+from tunelm.rewards.richness import is_short_loop_request, score_richness
 from tunelm.schemas import ComposeTask, EditTask, ExecutionResult, RepairTask, RLTask
 from tunelm.strudel.executor import StrudelExecutor
 from tunelm.strudel.parser import ResponseParseError, extract_completion_text, parse_model_response
@@ -31,6 +32,7 @@ class RewardResult:
 
     total: float
     components: dict[str, float]
+    execution: ExecutionResult | None = None
 
 
 class RewardEngine:
@@ -41,6 +43,7 @@ class RewardEngine:
         self.weights = weights or {
             "format": 0.1,
             "execution": 0.4,
+            "response_consistency": 0.3,
             "constraints": 0.5,
             "edit_consistency": 0.5,
             "repair_consistency": 0.5,
@@ -60,6 +63,9 @@ class RewardEngine:
         playable = result if result is not None and result.playable else None
         candidate_code = response.strudel_code if playable else None
         components["execution"] = float(playable is not None)
+        components["response_consistency"] = (
+            score_response_consistency(response, playable.features) if playable and response else 0.0
+        )
         if has_verifiable_constraints(constraints):
             components["constraints"] = (
                 score_constraints(playable.features, constraints) if playable else 0.0
@@ -73,7 +79,7 @@ class RewardEngine:
             if active_weight
             else 0.0
         )
-        return RewardResult(total=total, components=components)
+        return RewardResult(total=total, components=components, execution=result)
 
     def _richness_component(
         self, task: RLTask, playable: ExecutionResult | None
@@ -84,7 +90,13 @@ class RewardEngine:
             return {"richness": 0.0}
         if playable.backend == "static":
             return {}
-        return {"richness": score_richness(playable.features, self.executor.cycles)}
+        return {
+            "richness": score_richness(
+                playable.features,
+                self.executor.cycles,
+                short_loop=is_short_loop_request(task.prompt),
+            )
+        }
 
 
 def _consistency_components(task: RLTask, candidate_code: str | None) -> dict[str, float]:

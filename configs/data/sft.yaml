@@ -46,6 +46,8 @@ max_attempts: 5
 temperature: 0.7
 max_tokens: 16384
 minimum_constraint_score: 0.75
+minimum_response_consistency_score: 0.8
+minimum_compose_richness: 0.6
 minimum_task_consistency_score:
   default: 0.80
   edit: 0.50
@@ -78,5 +80,5 @@ weights:
 strudel:
   backend: node
   timeout_seconds: 10
-  cycles: 2
-  max_events: 4096
+  cycles: 8
+  max_events: 8192

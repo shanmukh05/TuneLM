@@ -1,6 +1,6 @@
-tasks: datasets/evaluation/benchmark.jsonl
-predictions: results/predictions.jsonl
-output: results/evaluation.jsonl
+tasks: datasets/evaluation/benchmark_ready.jsonl
+predictions: results/predictions_quality.jsonl
+output: results/evaluation_quality.jsonl
 generation:
   temperature: 0.0
   max_new_tokens: 1536
@@ -16,6 +16,9 @@ rewards:
   execution:
     enabled: true
     weight: 0.4
+  response_consistency:
+    enabled: true
+    weight: 0.3
   constraints:
     enabled: true
     weight: 0.5
@@ -27,4 +30,4 @@ rewards:
     weight: 0.5
   richness:
     enabled: true
-    weight: 0.2
+    weight: 0.8

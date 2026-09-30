@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TuneLM SFT Player</title>
+  <title>TuneLM Player</title>
   <style>
     :root {
       color-scheme: dark;
@@ -137,11 +137,15 @@
 </head>
 <body>
   <header>
-    <h1>TuneLM SFT Player</h1>
+    <h1>TuneLM Player</h1>
     <div class="toolbar">
       <label class="file">
-        Load train.jsonl
+        Load JSONL
         <input id="fileInput" type="file" accept=".jsonl,.json,.txt" />
+      </label>
+      <label class="file" id="taskLabel" hidden title="Match benchmark predictions to their prompts and context">
+        Load benchmark tasks
+        <input id="taskInput" type="file" accept=".jsonl,.json,.txt" />
       </label>
       <button id="randomBtn" type="button" disabled>Random</button>
       <button id="playBtn" class="play" type="button" disabled>Play</button>
@@ -159,24 +163,26 @@
     <section class="card">
       <div class="meta" id="meta"></div>
       <h2 class="section-title">Prompt</h2>
-      <p class="prompt" id="prompt">Load datasets/sft/train.jsonl to browse generated samples.</p>
+      <p class="prompt" id="prompt">Load SFT examples or benchmark predictions.</p>
       <div id="contextBlocks"></div>
     </section>
 
     <section class="card">
       <h2 class="section-title">Strudel code</h2>
       <textarea id="code" spellcheck="false" placeholder="strudel_code appears here"></textarea>
-      <p id="status" class="status">Open this file via a local server or pick train.jsonl. Strudel needs a click to start audio.</p>
+      <p id="status" class="status">Open this file via a local server or pick a JSONL file. Strudel needs a click to start audio.</p>
     </section>
   </main>
 
   <script type="module">
     import { initStrudel, evaluate, hush, samples } from "https://esm.sh/@strudel/web@1.2.6";
 
-    const state = { rows: [], index: 0, ready: false };
+    const state = { rows: [], tasks: new Map(), index: 0, ready: false };
 
     const els = {
       fileInput: document.getElementById("fileInput"),
+      taskInput: document.getElementById("taskInput"),
+      taskLabel: document.getElementById("taskLabel"),
       randomBtn: document.getElementById("randomBtn"),
       playBtn: document.getElementById("playBtn"),
       stopBtn: document.getElementById("stopBtn"),
@@ -208,6 +214,44 @@
             throw new Error(`Line ${i + 1}: ${error.message}`);
           }
         });
+    }
+
+    function isPrediction(row) {
+      return row && typeof row.task_id === "string" && "completion" in row;
+    }
+
+    function parseCompletion(completion) {
+      if (completion && typeof completion === "object" && !Array.isArray(completion)) {
+        return typeof completion.strudel_code === "string"
+          ? { response: completion, raw: false }
+          : { response: { strudel_code: JSON.stringify(completion, null, 2) }, raw: true };
+      }
+      const text = typeof completion === "string" ? completion.trim() : String(completion ?? "");
+      const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+      const candidate = fenced ? fenced[1] : text;
+      try {
+        const response = JSON.parse(candidate);
+        if (response && typeof response.strudel_code === "string") {
+          return { response, raw: false };
+        }
+      } catch {
+        // Keep malformed model output available for inspection and manual repair.
+      }
+      return { response: { strudel_code: text }, raw: true };
+    }
+
+    function displayRow(row) {
+      if (!isPrediction(row)) return row;
+      const task = state.tasks.get(row.task_id) || {};
+      const parsed = parseCompletion(row.completion);
+      return {
+        ...task,
+        id: row.task_id,
+        prompt: task.prompt || `Task ${row.task_id}. Load benchmark tasks for its prompt and context.`,
+        response: parsed.response,
+        missingTask: !state.tasks.has(row.task_id),
+        rawCompletion: parsed.raw,
+      };
     }
 
     function controlsMeta(row) {
@@ -265,9 +309,11 @@
 
     function render() {
       const hasRows = state.rows.length > 0;
-      const row = hasRows ? state.rows[state.index] : null;
+      const isBenchmark = hasRows && state.rows.some(isPrediction);
+      const row = hasRows ? displayRow(state.rows[state.index]) : null;
       const enabled = hasRows && state.ready;
 
+      els.taskLabel.hidden = !isBenchmark;
       els.randomBtn.disabled = !enabled;
       els.playBtn.disabled = !enabled;
       els.stopBtn.disabled = !enabled;
@@ -290,7 +336,7 @@
         row.id,
         ...generationModels(row).map((item) => `<span class="pill">${escapeHtml(item)}</span>`),
         ...(controlsMeta(row).map((item) => `<span class="pill">${escapeHtml(item)}</span>`)),
-      ];
+      ].filter(Boolean);
       els.meta.innerHTML = pills
         .map((item) => (item.startsWith("<") ? item : `<span class="pill">${escapeHtml(item)}</span>`))
         .join("");
@@ -308,18 +354,33 @@
       ].join("");
 
       els.code.value = row.response?.strudel_code || "";
-      setStatus(`Showing ${state.index + 1} / ${state.rows.length}`, "ok");
+      const warning = row.rawCompletion
+        ? " Raw completion shown; edit it to playable Strudel code if needed."
+        : row.missingTask
+          ? " Load benchmark tasks for the prompt and context."
+          : "";
+      setStatus(`Showing ${state.index + 1} / ${state.rows.length}.${warning}`, warning ? "" : "ok");
     }
 
     function loadRows(rows) {
       state.rows = rows;
       state.index = 0;
       render();
-      setStatus(`Loaded ${rows.length} rows. Click Play or Random.`, "ok");
     }
 
     async function loadText(text) {
       loadRows(parseJsonl(text));
+      if (state.rows.some(isPrediction) && !state.tasks.size && location.protocol !== "file:") {
+        try {
+          const url = new URL("../datasets/evaluation/benchmark_ready.jsonl", location.href);
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          state.tasks = new Map(parseJsonl(await response.text()).map((task) => [task.id, task]));
+          render();
+        } catch {
+          // The task picker also works when this page is opened directly from disk.
+        }
+      }
     }
 
     async function loadFromUrl(url) {
@@ -359,6 +420,21 @@
       }
     });
 
+    els.taskInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const tasks = parseJsonl(await file.text());
+        if (!tasks.length || tasks.some((task) => typeof task.id !== "string")) {
+          throw new Error("Expected benchmark task rows with an id field.");
+        }
+        state.tasks = new Map(tasks.map((task) => [task.id, task]));
+        render();
+      } catch (error) {
+        setStatus(String(error?.message || error), "error");
+      }
+    });
+
     els.randomBtn.addEventListener("click", () => {
       if (!state.rows.length) return;
       const next = Math.floor(Math.random() * state.rows.length);
@@ -392,14 +468,14 @@
     }).then(() => {
       state.ready = true;
       render();
-      setStatus("Strudel ready. Load train.jsonl, then Play or Random.", "ok");
+      setStatus("Strudel ready. Load a JSONL file, then Play or Random.", "ok");
       if (location.protocol !== "file:") {
         const param = new URLSearchParams(location.search).get("data");
         const data = param
           ? new URL(param, location.href).pathname
           : "/datasets/sft/train.jsonl";
         loadFromUrl(data).catch(() => {
-          setStatus("Strudel ready. Pick train.jsonl or serve this page from the repo root.", "ok");
+          setStatus("Strudel ready. Pick a JSONL file or serve this page from the repo root.", "ok");
         });
       }
     }).catch((error) => {

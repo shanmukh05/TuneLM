@@ -1,18 +1,14 @@
-"""Validate teacher responses before they enter the supervised dataset.
-
-Compose rows accept executable code with consistent controls only; hidden brief
-constraints are scored for reporting but not gated (RL rewards still use them).
-Edit and repair rows gate on execution plus task-consistency only; plan, controls,
-and constraint scores are reported but not required for SFT acceptance.
-"""
+"""Validate teacher responses against executable code and visible requirements."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from tunelm.rewards.constraints import has_verifiable_constraints, score_constraints
+from tunelm.rewards.constraints import has_verifiable_constraints, score_constraints, stated_constraints
 from tunelm.rewards.edit_consistency import score_edit_consistency
 from tunelm.rewards.repair_consistency import score_repair_consistency
+from tunelm.rewards.response_consistency import score_response_consistency
+from tunelm.rewards.richness import is_short_loop_request, score_richness
 from tunelm.schemas import ComposeTask, EditTask, ModelResponse, RLTask, RepairTask
 from tunelm.strudel.analyzer import DRUM_NAMES, canonical_instrument
 from tunelm.strudel.controls import controls_match_code
@@ -29,6 +25,8 @@ class ValidationReport:
     plan_consistent: bool
     controls_consistent: bool
     task_consistency_score: float
+    response_consistency_score: float
+    richness_score: float | None
     error: str | None
     features: dict
 
@@ -63,10 +61,6 @@ def _validation_error(
     minimum_task_consistency_score: float,
 ) -> str | None:
     reasons = [execution_error] if execution_error else []
-    if isinstance(task, ComposeTask):
-        if not controls_consistent:
-            reasons.append("controls do not match strudel_code features")
-        return "; ".join(reasons) or None
     if constraint_score is not None and constraint_score < minimum_constraint_score:
         reasons.append(
             f"constraint score {constraint_score:.3f} below {minimum_constraint_score:.3f}"
@@ -83,28 +77,23 @@ def _validation_error(
     return "; ".join(reasons) or None
 
 
-def _accept_solution(
-    task: RLTask,
-    *,
-    execution_valid: bool,
-    constraint_score: float | None,
-    minimum_constraint_score: float,
-    plan_consistent: bool,
-    controls_consistent: bool,
-    task_consistency_score: float,
-    minimum_task_consistency_score: float,
-) -> bool:
-    if isinstance(task, ComposeTask):
-        return execution_valid and controls_consistent
-    return execution_valid and task_consistency_score >= minimum_task_consistency_score
-
-
 def minimum_task_consistency_score(config: dict, task: RLTask) -> float:
     """Resolve per-task-type consistency threshold from flat or nested config."""
     raw = config.get("minimum_task_consistency_score", 0.8)
     if isinstance(raw, dict):
         return float(raw.get(task.task_type.value, raw.get("default", 0.8)))
     return float(raw)
+
+
+def validation_options(config: dict, task: RLTask) -> dict[str, float]:
+    return {
+        "minimum_constraint_score": float(config.get("minimum_constraint_score", 0.75)),
+        "minimum_task_consistency_score": minimum_task_consistency_score(config, task),
+        "minimum_response_consistency_score": float(
+            config.get("minimum_response_consistency_score", 0.8)
+        ),
+        "minimum_compose_richness": float(config.get("minimum_compose_richness", 0.0)),
+    }
 
 
 def classify_failure(
@@ -145,43 +134,67 @@ def validate_solution(
     *,
     minimum_constraint_score: float = 0.75,
     minimum_task_consistency_score: float = 0.8,
+    minimum_response_consistency_score: float = 0.8,
+    minimum_compose_richness: float = 0.0,
 ) -> ValidationReport:
     """Execute and verify one response, returning all acceptance components."""
     execution = executor.run(response.strudel_code)
     constraint_score = None
-    if has_verifiable_constraints(task.constraints):
+    visible_constraints = stated_constraints(task.prompt, task.constraints)
+    if has_verifiable_constraints(visible_constraints):
         constraint_score = (
-            score_constraints(execution.features, task.constraints) if execution.valid else 0.0
+            score_constraints(execution.features, visible_constraints) if execution.playable else 0.0
         )
     plan_consistent = _plan_matches(response, execution.features)
     controls_consistent = controls_match_code(response.controls, execution.features)
     task_consistency_score = _task_consistency(task, response.strudel_code)
-    valid = _accept_solution(
-        task,
-        execution_valid=execution.valid,
-        constraint_score=constraint_score,
-        minimum_constraint_score=minimum_constraint_score,
-        plan_consistent=plan_consistent,
-        controls_consistent=controls_consistent,
-        task_consistency_score=task_consistency_score,
-        minimum_task_consistency_score=minimum_task_consistency_score,
+    response_consistency_score = score_response_consistency(response, execution.features)
+    richness_score = (
+        score_richness(
+            execution.features,
+            executor.cycles,
+            short_loop=is_short_loop_request(task.prompt),
+        )
+        if isinstance(task, ComposeTask) and execution.backend == "node" and execution.playable
+        else None
     )
+    valid = (
+        execution.playable
+        and plan_consistent
+        and controls_consistent
+        and response_consistency_score >= minimum_response_consistency_score
+        and (constraint_score is None or constraint_score >= minimum_constraint_score)
+        and task_consistency_score >= minimum_task_consistency_score
+        and (
+            not isinstance(task, ComposeTask)
+            or richness_score is None
+            or richness_score >= minimum_compose_richness
+        )
+    )
+    error = _validation_error(
+        task,
+        execution.error if not execution.playable else None,
+        constraint_score,
+        minimum_constraint_score,
+        plan_consistent,
+        controls_consistent,
+        task_consistency_score,
+        minimum_task_consistency_score,
+    )
+    reasons = [error] if error else []
+    if response_consistency_score < minimum_response_consistency_score:
+        reasons.append("response metadata does not match code")
+    if richness_score is not None and richness_score < minimum_compose_richness:
+        reasons.append("composition repeats too soon")
     return ValidationReport(
         valid=valid,
-        execution_valid=execution.valid,
+        execution_valid=execution.playable,
         constraint_score=constraint_score,
         plan_consistent=plan_consistent,
         controls_consistent=controls_consistent,
         task_consistency_score=task_consistency_score,
-        error=_validation_error(
-            task,
-            execution.error,
-            constraint_score,
-            minimum_constraint_score,
-            plan_consistent,
-            controls_consistent,
-            task_consistency_score,
-            minimum_task_consistency_score,
-        ),
+        response_consistency_score=response_consistency_score,
+        richness_score=richness_score,
+        error="; ".join(reasons) or None,
         features=execution.features,
     )

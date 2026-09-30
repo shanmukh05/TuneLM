@@ -29,7 +29,7 @@ train = [
   "trl>=0.29,<0.30",
   "wandb>=0.25,<1",
 ]
-dev = ["pytest>=8.0", "ruff>=0.9"]
+dev = ["ruff>=0.9"]
 modal = ["modal>=0.73", "huggingface_hub", "fastapi[standard]"]
 
 [project.scripts]
@@ -41,13 +41,6 @@ packages = ["src/tunelm"]
 
 [tool.hatch.build]
 artifacts = ["src/tunelm/strudel/bridge.js"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-  "gpu: needs a CUDA GPU and may load model weights",
-  "slow: long-running integration checks",
-]
 
 [tool.ruff]
 line-length = 100

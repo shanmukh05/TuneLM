@@ -37,7 +37,7 @@ from tunelm.sft_data.solution_generator import generate_solution
 from tunelm.sft_data.task_generator import generate_sft_tasks
 from tunelm.sft_data.validator import (
     classify_failure,
-    minimum_task_consistency_score,
+    validation_options,
     validate_solution,
 )
 from tunelm.strudel.executor import executor_from_config
@@ -145,8 +145,7 @@ def _generate_teacher_rows(
                     task,
                     response,
                     executor,
-                    minimum_constraint_score=float(config.get("minimum_constraint_score", 0.75)),
-                    minimum_task_consistency_score=minimum_task_consistency_score(config, task),
+                    **validation_options(config, task),
                 )
             except Exception as exc:
                 error = str(exc)

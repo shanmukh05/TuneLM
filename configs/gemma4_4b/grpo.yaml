@@ -1,10 +1,12 @@
 extends: model.yaml
 model:
-  adapter: checkpoints/gemma4-4b-sft
-lora:
-  enabled: false
+  name: tensorfiend/tunelm-gemma4-4b-sft-quality-20260927-86-best
+  merged_sft: true
 data:
-  train_file: datasets/rl/train.jsonl
+  train_file: datasets/rl/quality_train.jsonl
+  validation_size: 30
+  compose_repeat_factor: 2
+  min_compose_constraint_fraction: 0.3
 # 8 cycles so later sections (arrange, <...>) are executed and scored.
 strudel:
   backend: node
@@ -18,6 +20,9 @@ rewards:
   execution:
     enabled: true
     weight: 0.4
+  response_consistency:
+    enabled: true
+    weight: 0.3
   constraints:
     enabled: true
     weight: 0.5
@@ -29,7 +34,7 @@ rewards:
     weight: 0.5
   richness:
     enabled: true
-    weight: 0.2
+    weight: 0.8
 training:
   backend: transformers
   output_dir: checkpoints/gemma4-4b-grpo
@@ -37,12 +42,16 @@ training:
   per_device_train_batch_size: 4
   gradient_accumulation_steps: 8
   learning_rate: 0.000005
+  beta: 0.01
   num_generations: 8
+  num_generations_eval: 2
+  per_device_eval_batch_size: 2
   max_completion_length: 2048
   max_steps: 200
   logging_steps: 5
-  save_steps: 50
-  save_total_limit: 2
+  eval_steps: 40
+  save_steps: 40
+  save_total_limit: 5
   bf16: true
   gradient_checkpointing: true
   mask_truncated_completions: true

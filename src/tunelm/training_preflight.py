@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from tunelm.config import load_config, project_path, repo_root
+from tunelm.io import read_jsonl
+from tunelm.rewards.constraints import has_verifiable_constraints, stated_constraints
 
 
 def require_dataset(path: str | Path) -> Path:
@@ -82,9 +84,55 @@ def _validate_grpo(config: dict, *, strict: bool) -> list[str]:
             "GRPO effective batch size "
             f"({effective_batch}) must be divisible by num_generations ({generations})"
         )
-    adapter = config.get("model", {}).get("adapter")
+    validation_size = int(config.get("data", {}).get("validation_size", 0))
+    if validation_size < 0:
+        raise ValueError("data.validation_size must be nonnegative")
+    if int(config.get("data", {}).get("compose_repeat_factor", 1)) < 1:
+        raise ValueError("data.compose_repeat_factor must be at least 1")
+    if validation_size:
+        eval_steps = int(training.get("eval_steps", 0))
+        if eval_steps <= 0:
+            raise ValueError("GRPO validation requires training.eval_steps > 0")
+        if int(training.get("save_steps", 0)) != eval_steps:
+            raise ValueError("GRPO validation requires training.save_steps == training.eval_steps")
+        max_steps = int(training.get("max_steps", 0))
+        required_checkpoints = max_steps // eval_steps
+        if int(training.get("save_total_limit", 0)) < required_checkpoints:
+            raise ValueError(
+                "GRPO validation requires training.save_total_limit to retain every "
+                f"evaluation checkpoint ({required_checkpoints})"
+            )
+        eval_generations = int(training.get("num_generations_eval", generations))
+        eval_batch = int(training.get("per_device_eval_batch_size", 1))
+        if eval_generations <= 0 or eval_batch % eval_generations:
+            raise ValueError("GRPO eval batch size must be divisible by num_generations_eval")
+        dataset_path = project_path(config["data"]["train_file"])
+        if dataset_path.is_file() and validation_size >= sum(1 for _ in read_jsonl(dataset_path)):
+            raise ValueError("data.validation_size must be smaller than the task count")
+    minimum_coverage = float(config.get("data", {}).get("min_compose_constraint_fraction", 0.0))
+    dataset_path = project_path(config["data"]["train_file"])
+    if minimum_coverage and dataset_path.is_file():
+        compose = [row for row in read_jsonl(dataset_path) if row.get("task_type") == "compose"]
+        if not compose:
+            raise ValueError("GRPO task bank has no compose tasks")
+        covered = sum(
+            has_verifiable_constraints(stated_constraints(row["prompt"], row.get("constraints", {})))
+            for row in compose
+        )
+        coverage = covered / len(compose)
+        if coverage < minimum_coverage:
+            raise ValueError(
+                f"GRPO compose constraint coverage {coverage:.1%} is below "
+                f"{minimum_coverage:.1%}; regenerate the task bank with visible briefs"
+            )
+    model = config.get("model", {})
+    adapter = model.get("adapter")
     if not adapter:
-        raise ValueError("GRPO config must define model.adapter with the SFT checkpoint")
+        if not model.get("merged_sft"):
+            raise ValueError("GRPO requires model.adapter or model.merged_sft=true")
+        if not config.get("lora", {}).get("enabled", True):
+            raise ValueError("GRPO merged SFT model requires lora.enabled=true")
+        return []
     if project_path(adapter).exists():
         return []
     message = f"SFT adapter not found yet: {adapter}"
@@ -135,7 +183,11 @@ def validate_training_config(
     if pipeline == "grpo":
         warnings.extend(_validate_grpo(config, strict=strict_adapter))
     elif not config.get("lora", {}).get("enabled", True):
-        warnings.append("SFT config has lora.enabled=false; no new adapter will be trained")
+        adapter = config.get("model", {}).get("adapter")
+        if not adapter:
+            warnings.append("SFT config has lora.enabled=false and no trainable adapter")
+        elif not project_path(adapter).exists():
+            warnings.append(f"SFT adapter not found yet: {adapter}")
 
     return {
         "pipeline": pipeline,

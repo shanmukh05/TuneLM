@@ -14,7 +14,7 @@ from tunelm.sft_data.example_builder import build_sft_example
 from tunelm.sft_data.solution_generator import generate_solution
 from tunelm.sft_data.validator import (
     classify_failure,
-    minimum_task_consistency_score,
+    validation_options,
     validate_solution,
 )
 from tunelm.strudel.executor import StrudelExecutor
@@ -56,8 +56,7 @@ def _process_task(
                 task,
                 response,
                 executor,
-                minimum_constraint_score=float(config.get("minimum_constraint_score", 0.75)),
-                minimum_task_consistency_score=minimum_task_consistency_score(config, task),
+                **validation_options(config, task),
             )
         except Exception as exc:
             error = str(exc)

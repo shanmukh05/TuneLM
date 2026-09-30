@@ -25,7 +25,7 @@ flowchart LR
   ST --> G[GRPO]
   R --> G
   G --> C[Candidate response]
-  C --> W[Format / execution / constraint / edit rewards]
+  C --> W[Format / execution / constraint / metadata / edit / form rewards]
   W --> G
   C --> E[Fixed benchmark evaluation]
 ```
@@ -125,7 +125,7 @@ task but is not scored until a defensible audio or embedding verifier exists.
   packages in a fresh Node process, queries the resulting pattern for a bounded
   number of cycles, and returns normalized events.
 - `static` checks basic structure and extracts features without claiming full
-  execution. It is useful for unit tests and development without npm packages.
+  execution. It is useful for development without npm packages.
 - `auto` tries Node and falls back to static only when Node or the packages are
   unavailable. It does not hide ordinary Strudel execution errors.
 
@@ -138,7 +138,10 @@ returns events, `instruments` comes from audible events (not muted by
 edit/repair comparisons) it falls back to string arguments in the source.
 `layer_count` is the widest `stack(...)` argument count, or 1 without `stack`.
 `ExecutionResult.playable` means the code executed and produced events; the
-static backend cannot count events and is treated as playable.
+static backend cannot count events and is treated as playable. Node execution
+uses the tempo actually requested at runtime; commented-out `setcpm` text
+cannot earn tempo credit. Per-cycle variation compares sound and pitch events,
+not effect-only changes such as pan or gain automation.
 
 The current `@strudel/core` package imports `@kabelsalat/web` from an ESM entry
 point that its package metadata does not select under Node. The npm postinstall
@@ -177,8 +180,9 @@ a read-only filesystem, and OS-level CPU/memory/process limits.
    prompt (plus edit/repair code context). Constraints remain on the task row for
    validation and rewards but are not injected into the user message.
 5. The teacher completion is parsed and executed.
-6. Execution, explicit constraints, plan/code instrument overlap, edit success,
-   and repair preservation are checked as applicable. Invalid attempts can be
+6. Playable execution over eight cycles, prompt-stated constraints, response/code
+   agreement, compose form, edit success, and repair preservation are checked
+   as applicable. Invalid attempts can be
    sent back once or more with the validator error and previous answer;
    exhausted examples are dropped.
 7. Accepted rows record provider, model, UTC timestamp, validation details, and
@@ -354,9 +358,10 @@ Rewards are independent Python functions/classes:
 | Format | Completion validates against the exact response schema |
 | Execution | Strudel produces a queryable pattern without an error **and** at least one event (playable) |
 | Constraints | Mean satisfaction across explicit tempo, instrument, and layer constraints that the prompt states |
-| Edit consistency | Requested directional changes plus equality of named preserved features |
+| Response consistency | Plan and controls tempo/instruments agree with executable code |
+| Edit consistency | Requested changes must succeed; preserved features and named `const` layers receive credit |
 | Repair consistency | Equality of tempo, instruments, notes, layer count, and drum density to the valid reference |
-| Richness (compose) | Mean of cycle coverage and per-cycle variation over the queried cycles (`rewards/richness.py`) |
+| Richness (compose) | Audible coverage multiplied by musical variation across up to eight cycles; explicit short-loop requests are exempt |
 
 `RewardEngine` provides a normalized weighted score for offline evaluation.
 `RewardAdapter` exposes the same logic in TRL-compatible callables and shares an
@@ -367,15 +372,17 @@ from the task, not the completion: `stated_constraints(prompt, constraints)`
 first drops targets the prompt never states (no "N BPM", instrument not named,
 no explicit layer count), then tasks without remaining constraints return
 `None`, while unplayable completions for constrained tasks receive zero. SFT
-teacher validation still records hidden constraints for reporting only.
+teacher validation applies the same prompt-visible constraint rule.
 Edit, repair, and richness also receive zero when the candidate is not playable,
 so structural similarity cannot reward an unchanged broken or silent program.
 Richness returns `None` for edit/repair rows and for the static backend, which
 cannot produce events.
 
 Known limits: prompt-mention matching is keyword-based and can keep a
-constraint on an incidental word; richness is a proxy that random functions
-can inflate, so its weight stays small until an audio or judge reward exists.
+constraint on an incidental word. Richness and response consistency are
+structural proxies, not audio or taste measurements. The quality workflow adds
+a listening review CSV for these judgments. Before GRPO, preflight checks the
+fraction of compose tasks with a visible, verifiable requirement.
 
 The checked-in SFT smoke fixture passes execution, constraint, plan/code, and
 edit/repair-consistency verification. SFT validation with `--check-execution`
@@ -411,8 +418,10 @@ JarvisLabs launches a single config via `scripts/jarvislabs/cloud_train.py
 only on the assistant completion. `GRPOTrainer` consumes conversational prompts
 and custom reward functions; every RL row carries the same reward columns
 (`null` where not applicable) so mixed compose/edit/repair banks load into
-Arrow. Both use a common causal-language-model loader and
-PEFT LoRA adapter, save their
+Arrow. GRPO holds out a task-stratified validation set before repeating compose
+training rows, and logs counts-aware per-task and weighted-objective metrics so
+inapplicable rewards do not poison validation aggregates. Both use a common
+causal-language-model loader and PEFT LoRA adapter, save their
 tokenizer/checkpoint, and write `experiment.json` with the full config, runtime,
 dataset size, timestamp, and Git commit when available.
 
@@ -432,8 +441,8 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[datasets/rl/train.jsonl] --> B[prepare_rl_row<br/>messages_for_task]
-  B --> C[Load SFT checkpoint + LoRA]
+  A[datasets/rl/quality_train.jsonl] --> B[Hold out seeded validation tasks<br/>prepare_rl_row]
+  B --> C[Load merged SFT model from Hugging Face<br/>attach new LoRA]
   C --> D[GRPOTrainer<br/>num_generations per prompt]
   D --> E[Sample N completions from policy]
   E --> F[RewardAdapter]

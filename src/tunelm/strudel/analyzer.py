@@ -101,6 +101,7 @@ def _tokens(notation: str) -> list[str]:
 
 
 def infer_tempo(code: str) -> float | None:
+    code = _strip_comments(code)
     setcpm = re.search(r"\bsetcpm\s*\(\s*([0-9.]+)(?:\s*/\s*([0-9.]+))?\s*\)", code)
     if setcpm:
         numerator = float(setcpm.group(1))
@@ -172,7 +173,9 @@ def _cycle_features(onsets: list[dict[str, Any]]) -> tuple[int, int]:
         if begin is None:
             continue
         cycle = math.floor(begin)
-        signature = (round(begin - cycle, 4), json.dumps(event["value"], sort_keys=True))
+        value = event["value"]
+        musical_value = {key: value[key] for key in ("s", "note", "n") if key in value}
+        signature = (round(begin - cycle, 4), json.dumps(musical_value, sort_keys=True))
         per_cycle.setdefault(cycle, []).append(signature)
     distinct = {tuple(sorted(items)) for items in per_cycle.values()}
     return len(per_cycle), len(distinct)

@@ -11,7 +11,7 @@ code diff, Markdown, or a multi-message conversation.
 | Stage | JSONL input | Model input | Target / output |
 |---|---|---|---|
 | SFT | `datasets/sft/train.jsonl`: task fields, a teacher `response`, and `metadata` | System instruction + formatted task user message | The serialized `response` JSON followed by the tokenizer's end-of-sequence token. Loss applies only to this completion. |
-| GRPO (RL) | `datasets/rl/train.jsonl`: task fields, **no** `response` | The same system instruction + formatted task user message | The policy samples complete JSON responses. Format, execution, prompt-stated constraints, edit, repair, and compose richness rewards score them; there is no gold completion in this file. |
+| GRPO (RL) | `datasets/rl/quality_train.jsonl`: task fields, **no** `response` | The same system instruction + formatted task user message | The policy samples complete JSON responses. Format, execution, response consistency, prompt-stated constraints, edit, repair, and compose richness rewards score them; there is no gold completion in this file. |
 
 Each JSONL file has one JSON object per line. The examples below show the
 relevant fields, not every optional/default field that a generated row may
@@ -167,7 +167,7 @@ instruction in `src/tunelm/models/templates.py` for the exact contract.
 - GRPO (`tunelm.rl.trainer.prepare_rl_row`) replaces the stored text `prompt`
   with a conversational `prompt` containing `system` and `user` messages and
   keeps a fixed set of reward columns on **every** row: `task_type`,
-  `constraints` (pruned to what the prompt states), `original_code`,
+  `constraints` (pruned to what the prompt states), `short_loop`, `original_code`,
   `expected_changes`, `preserve`, and `reference_code` (`null` when not
   applicable). Uniform columns are required because Arrow cannot store a mixed
   task bank whose rows have different keys. Inapplicable rewards return `None`

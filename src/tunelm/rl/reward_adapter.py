@@ -12,6 +12,7 @@ from tunelm.rewards.constraints import has_verifiable_constraints, score_constra
 from tunelm.rewards.edit_consistency import score_edit_consistency
 from tunelm.rewards.format import score_format
 from tunelm.rewards.repair_consistency import score_repair_consistency
+from tunelm.rewards.response_consistency import score_response_consistency
 from tunelm.rewards.richness import score_richness
 from tunelm.strudel.parser import ResponseParseError, extract_completion_text, parse_model_response
 
@@ -36,7 +37,9 @@ class RewardAdapter:
         try:
             response = parse_model_response(text)
             result = self.executor.run(response.strudel_code)
-            result = result.model_copy(update={"events": []})
+            features = dict(result.features)
+            features.pop("event_values", None)
+            result = result.model_copy(update={"events": [], "features": features})
         except ResponseParseError:
             result = None
         self.cache[text] = result
@@ -53,6 +56,17 @@ class RewardAdapter:
 
     def execution_reward(self, completions, **kwargs):
         return [float(self._playable(value) is not None) for value in completions]
+
+    def response_consistency_reward(self, completions, **kwargs):
+        output = []
+        for value in completions:
+            result = self._playable(value)
+            if result is None:
+                output.append(0.0)
+                continue
+            response = parse_model_response(extract_completion_text(value))
+            output.append(score_response_consistency(response, result.features))
+        return output
 
     def constraint_reward(self, completions, constraints=None, **kwargs):
         constraints = constraints or [{}] * len(completions)
@@ -118,7 +132,7 @@ class RewardAdapter:
                 output.append(0.0)
         return output
 
-    def richness_reward(self, completions, task_type=None, **kwargs):
+    def richness_reward(self, completions, task_type=None, short_loop=None, **kwargs):
         """Compose-only; `None` for edit/repair and for the static backend (no events)."""
         types = task_type or [None] * len(completions)
         output = []
@@ -132,5 +146,6 @@ class RewardAdapter:
             elif result.backend == "static":
                 output.append(None)
             else:
-                output.append(score_richness(result.features, self.executor.cycles))
+                loop = short_loop[index] if isinstance(short_loop, list) else bool(short_loop)
+                output.append(score_richness(result.features, self.executor.cycles, short_loop=loop))
         return output

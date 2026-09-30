@@ -1,624 +1,450 @@
-# TuneLM usage
+# TuneLM command guide
 
-See [workflows.md](workflows.md) for Mermaid diagrams of SFT/RL data prep and training.
-See [training-io.md](training-io.md) for the exact model-visible inputs and
-assistant response contract for compose, edit, and repair.
+Run commands from the repository root unless noted. This is the command reference
+for data, SFT, GRPO, evaluation, publishing, and inference. The model input/output contract is in
+[training-io.md](training-io.md), and the pipeline diagrams are in
+[workflows.md](workflows.md).
 
-## Requirements
+## Setup
 
-- Python 3.11+
-- Node.js 18+
-- An NVIDIA CUDA environment for the supplied 4-bit training configs
-- One or more provider API keys only when generating SFT teacher solutions
-
-From the repository root:
+Python 3.11+, Node.js 18+, and npm are required. Training and model generation
+need a CUDA GPU. Dataset checks and scoring saved predictions can run locally
+without one. Keep provider and Hugging Face tokens in environment variables or
+local `.env`/`.env.local`, never in config files.
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev]'
+pip install -e '.[dev,train]'
 npm install
 ```
 
-### Local verification (no GPU, no model weights)
+Install `pip install -e '.[providers]'` for
+API-backed dataset generation and `pip install -e '.[modal]'` for Modal
+deployment. Use a CUDA-compatible PyTorch build on a GPU host. `npm install` provides
+the Node Strudel verifier; its execution/playability check is not an audio
+render or a listening-quality judgment. `python scripts/train.py --config
+CONFIG --dry-run` checks training inputs without loading weights or starting a
+GPU run.
 
-Confirm a training config without loading Gemma/Qwen checkpoints:
-
-```bash
-python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml --dry-run
-python scripts/train.py --config configs/gemma4_4b/smoke_grpo.yaml --dry-run
-pytest
-```
-
-Smoke configs are validated strictly; full SFT/GRPO configs warn when teacher
-data or SFT adapters are not generated yet. Run real training on a cloud GPU
-(see JarvisLabs section below).
-
-Install provider and training dependencies when needed:
-
-```bash
-pip install -e '.[providers,train]'
-```
-
-Quantized training also needs a CUDA-compatible `torch` build. `bitsandbytes`
-is included in the training extra:
-
-```bash
-pip install torch
-```
-
-## Scripts
-
-| Script / entry point | Purpose |
-|--------|---------|
-| `scripts/generate.py` / `tunelm-generate` | RL tasks, benchmark, or SFT data |
-| `scripts/train.py` / `tunelm-train` | SFT, GRPO, or evaluation |
-| `scripts/validate_data.py` | JSONL schema and diversity checks |
-| `scripts/infer.py` | Interactive checkpoint inference |
-
-Both `generate.py` and `train.py` delegate to `src/tunelm/cli.py` and infer the
-pipeline from the loaded YAML:
-
-| Config shape | Routed to |
-|--------------|-----------|
-| `providers` present | SFT data generation |
-| otherwise | RL / benchmark task generation |
-| `tasks` + `predictions` present | Evaluation |
-| `rewards` + `data.train_file` | GRPO training |
-| `data.train_file` only | SFT training |
-
-## Configuration layout
-
-Training configs are grouped by model under `configs/<model>/`:
-
-```
-configs/
-  gemma4_4b/          # default
-    model.yaml        # shared HF name, quantization, LoRA defaults
-    sft.yaml
-    grpo.yaml
-    smoke_sft.yaml
-    smoke_grpo.yaml
-  qwen3_06b/
-    model.yaml
-    sft.yaml
-    grpo.yaml
-    smoke_sft.yaml
-    smoke_grpo.yaml
-  data/               # dataset generation configs
-  eval/
-```
-
-Each training config uses `extends: model.yaml`. SFT and GRPO configs are run
-independently — inspect checkpoints between stages rather than chaining them
-automatically.
-
-| Model | HF checkpoint | Notes |
-|-------|---------------|-------|
-| Gemma 4 E4B (default) | `google/gemma-4-E4B-it` | About 8B total/4B effective parameters; text-only causal path |
-| Qwen3 0.6B | `Qwen/Qwen3-0.6B` | Smaller text-only baseline |
-
-## 1. Verify Strudel execution
-
-```bash
-python - <<'PY'
-from tunelm.strudel import StrudelExecutor
-
-result = StrudelExecutor(backend="node").run(
-    'setcpm(120/4)\nstack(s("bd sd"), s("hh*8").gain(0.35))'
-)
-print(result.model_dump_json(indent=2))
-PY
-```
-
-`valid: true`, non-empty `events`, and `backend: node` show that the real fast
-executor is available. If npm dependencies cannot be installed, use
-`backend="static"` for schema/reward development only.
-
-## 2. Generate RL tasks
-
-Task vocabularies and templates live in `configs/data/vocab/`. This includes
-instruments and aliases, ensembles, moods, genres, rhythms, structures,
-textures, tempo ranges, compose prompts, verifier-supported edit operations,
-and executable repair templates. Each generated row stores the final varied
-musician request directly in `prompt`.
-
-Each canonical instrument has a `sounds` entry. Use the natural canonical name
-in prompts and constraints; TuneLM supplies the mapped Strudel.cc identifier
-(for example, `violin: gm_violin`, `shaker: sh`, or
-`synth: gm_lead_2_sawtooth`) to the model. Add a vocabulary instrument only
-when a built-in sample, registered GM SoundFont, or synthesizer sound can
-implement it.
-
-The authoritative naming references are Strudel's
-[Samples](https://strudel.cc/learn/samples/) and
-[Synths](https://strudel.cc/learn/synths/) documentation. Strudel.cc registers
-its GM SoundFonts automatically; another host embedding Strudel must register
-the same soundfonts before playing `gm_*` identifiers.
-
-Generate the default RL task bank (3,000 tasks):
-
-```bash
-python scripts/generate.py --config configs/data/rl_tasks.yaml
-python scripts/validate_data.py \
-  --input datasets/rl/train.jsonl \
-  --kind rl \
-  --diversity-config configs/data/diversity_thresholds.json
-```
-
-### Staged RL generation (review prompts first)
-
-When `batch.enabled: true` (default) and `prompt_author` is configured, styled
-prompts are authored through the Gemini Batch API at 50% of standard pricing.
-Set `batch.enabled: false` to use synchronous prompt authoring.
-
-Set `stage` in `configs/data/rl_tasks.yaml`:
-
-| `stage` | What it does |
+| Entry point | Commands |
 |---|---|
-| `prompts` | Batch prompt authoring → `prompts_file` |
-| `tasks` | Copy curated `prompts_file` to `output` |
-| `full` | Batch prompt authoring directly to `output` (default) |
+| `scripts/generate.py --config CONFIG` | Create RL tasks, benchmark tasks, or SFT teacher data, routed by config |
+| `scripts/prepare_quality_data.py sft/rl` | Refilter SFT examples or add visible RL briefs |
+| `scripts/build_quality_benchmark.py` | Add fixed user-style requests to the procedural benchmark |
+| `scripts/validate_data.py` | Check dataset schema, diversity, disjointness, and optional execution |
+| `scripts/train.py --config CONFIG` | Train SFT/GRPO or evaluate predictions, routed by config |
+| `scripts/infer.py PROMPT --checkpoint MODEL` | Local/GPU inference with Node compile-and-retry |
+| `scripts/jarvislabs/cloud_train.py` | Cloud train, benchmark, publish, fetch, status, and down |
+| `scripts/modal/app.py` and `scripts/modal/infer.py` | Deploy a Hub model and call its endpoint |
+
+After installation, `tunelm-generate --config CONFIG` and
+`tunelm-train --config CONFIG` are equivalent to `scripts/generate.py` and
+`scripts/train.py` respectively. The YAML determines which pipeline runs.
+
+## Prepare data
+
+The current quality artifacts already exist: `datasets/sft/quality_train.jsonl`
+(3,914 rows), `datasets/sft/quality_val.jsonl` (398),
+`datasets/rl/quality_train.jsonl` (3,000), and
+`datasets/evaluation/benchmark_ready.jsonl` (220). Do not regenerate or edit
+the frozen benchmark while comparing checkpoints. Check the prepared files:
 
 ```bash
-# 1. Generate and inspect styled prompts
-#    Set stage: prompts in configs/data/rl_tasks.yaml
-python scripts/generate.py --config configs/data/rl_tasks.yaml
-python scripts/validate_data.py \
-  --input datasets/rl/prompts.jsonl \
-  --kind rl
-
-# Edit datasets/rl/prompts.jsonl: delete or edit rows as needed
-
-# 2. Finalize the task bank
-#    Set stage: tasks in configs/data/rl_tasks.yaml
-python scripts/generate.py --config configs/data/rl_tasks.yaml
+python scripts/validate_data.py --input datasets/sft/quality_train.jsonl --kind sft
+python scripts/validate_data.py --input datasets/sft/quality_val.jsonl --kind sft
+python scripts/validate_data.py --input datasets/evaluation/benchmark_ready.jsonl \
+  --kind rl --disjoint-from datasets/rl/quality_train.jsonl \
+  --min-unique-prompts 0.95
 ```
 
-When `prompt_author` is configured, procedural skeletons (constraints, code,
-verifier metadata) are generated first, then each row gets a randomly chosen
-**style** prompt:
+### RL task banks
 
-| Task type | Styles |
-|---|---|
-| compose | `scene`, `musician`, `brief` |
-| edit | `imperative`, `conversational` |
-| repair | `direct`, `collaborative`, `diagnostic` |
-
-Prompt authoring always calls a configured model; it does not fall back to
-template text. Edit tasks keep `instruction` unchanged for rewards; only the
-musician-facing `prompt` is rewritten.
-
-`scene` and `musician` prompts are deliberately vague: the author never sees
-tempo, instruments, or layer counts, so GRPO does not score those constraints
-for them (see "Run GRPO"). `brief` is the only compose style that receives
-`tempo_bpm`, `instruments`, `avoid_instruments`, and `min_layers`, and must
-state them in a short user-style sentence ("Funky clap and slap bass groove
-around 105 BPM, at least 3 layers"). Keep `brief` in `compose_styles` if you
-want the constraint reward to train instruction following. The current
-`datasets/rl/train.jsonl` was generated before `brief` existed; regenerate it to
-get compose tasks with visible constraints.
-
-Without `prompt_author`, legacy `mode: hybrid` still applies (`llm_fraction`
-generates full task specs via LLM). The committed `datasets/rl/train.jsonl`
-remains the smoke/reference bank for local tests.
-
-Regenerate after changing vocab files under `configs/data/vocab/`.
-
-Generate the 500-task benchmark after the train set:
-
-```bash
-python scripts/generate.py --config configs/data/benchmark.yaml
-python scripts/validate_data.py \
-  --input datasets/evaluation/benchmark.jsonl \
-  --kind rl \
-  --disjoint-from datasets/rl/train.jsonl \
-  --min-unique-prompts 0.95 \
-  --diversity-config configs/data/diversity_thresholds.json \
-  --check-execution \
-  --backend node
-```
-
-## 3. Generate validated SFT data
-
-Set keys in the shell, never in YAML or committed files:
+The authored task configs require `GEMINI_API_KEY`. `rl_tasks.yaml` is the
+original bank; `rl_quality_tasks.yaml` is a separate, more brief-heavy bank.
+The quality-training config currently uses the curated bank below, not the
+newly generated one.
 
 ```bash
 export GEMINI_API_KEY='...'
-export OPENROUTER_API_KEY='...'   # optional
-export DEEPSEEK_API_KEY='...'     # optional
+python scripts/generate.py --config configs/data/rl_tasks.yaml
+python scripts/validate_data.py --input datasets/rl/train.jsonl --kind rl \
+  --diversity-config configs/data/diversity_thresholds.json
+
+# No provider call: add explicit targets to a seeded share of the existing bank.
+python scripts/prepare_quality_data.py rl \
+  --source datasets/rl/train.jsonl --output datasets/rl/quality_train.jsonl
+
+# Optional fresh bank. Inspect its prompts before selecting it for GRPO.
+python scripts/generate.py --config configs/data/rl_quality_tasks.yaml
 ```
 
-Configure models in `configs/data/sft.yaml` under `models` (each YAML key is the
-model id stored in `metadata.teacher`):
+These commands refuse to replace prepared quality output unless you pass
+`--overwrite`. RL generation supports `stage: prompts`, `tasks`, or `full` in
+its YAML; `prompts` lets you review `prompts_file` before `tasks` finalizes it.
+The current `rl_tasks.yaml` defaults to `full` and `append: true`.
 
-```yaml
-models:
-  gemini-flash:
-    enabled: true
-    provider: gemini
-    model: gemini-2.5-flash
-  deepseek-chat:
-    enabled: true
-    provider: deepseek
-    model: deepseek-chat
-  openrouter-gemini:
-    enabled: true
-    provider: openrouter
-    model: google/gemini-2.5-flash
-parallel_models: true
-parallel_workers: 4
-```
+### SFT teacher data
 
-Batch mode (`batch.enabled: true`, default) uses the Gemini Batch API for prompt
-authoring and teacher generation at 50% of standard pricing. Batch mode requires
-exactly one enabled Gemini model for each stage (`compose.prompt_author.models`
-for prompts, top-level `models` for samples/regenerate).
-
-Then run:
+`configs/data/sft.yaml` currently defaults to `stage: samples` and synchronous
+generation, so it expects an existing `prompts_file`. For a fresh staged run,
+use `configs/data/sft_quality.yaml` and set its `stage` successively to
+`prompts`, `samples`, `validate`, and `regenerate`. The last two stages run the
+Node verifier. Teacher/provider settings live in that YAML.
 
 ```bash
-python scripts/generate.py --config configs/data/sft.yaml
-python scripts/validate_data.py \
-  --input datasets/sft/train.jsonl \
-  --kind sft \
-  --check-execution \
-  --backend node \
-  --validation-config configs/data/sft.yaml
+export GEMINI_API_KEY='...'
+# With stage: prompts in configs/data/sft_quality.yaml
+python scripts/generate.py --config configs/data/sft_quality.yaml
+# Change stage to samples, then run the same command.
+python scripts/generate.py --config configs/data/sft_quality.yaml
+# Change stage to validate, then run the same command.
+python scripts/generate.py --config configs/data/sft_quality.yaml
+# Optional: change stage to regenerate and run it again for failed rows.
+python scripts/generate.py --config configs/data/sft_quality.yaml
 ```
 
-### Batch staged workflow
-
-Set `stage` in `configs/data/sft.yaml`:
-
-| `stage` | What it does |
-|---|---|
-| `prompts` | Batch prompt authoring → `prompts_file` |
-| `samples` | Batch teacher generation → `samples_file` (`metadata.valid` unset) |
-| `validate` | Strudel validation; sets `metadata.valid`; exports valid rows to `output` |
-| `regenerate` | Batch retry rows where `metadata.valid: false` (up to `max_attempts`) |
-| `full` | Run prompts → samples → validate → regenerate loop (default) |
-
-`responses` is an alias for `samples`.
+To recheck the original SFT rows under the stronger quality rules, use separate
+accepted and rejected outputs. The current quality files were produced this
+way, so use `--overwrite` only when intentionally rebuilding them:
 
 ```bash
-# 1. Batch-generate prompts
-#    stage: prompts
-python scripts/generate.py --config configs/data/sft.yaml
-
-# Optional: review datasets/sft/prompts.jsonl
-
-# 2. Batch-generate teacher samples (no Strudel check yet)
-#    stage: samples
-python scripts/generate.py --config configs/data/sft.yaml
-
-# 3. Validate every sample and export passing rows
-#    stage: validate
-python scripts/generate.py --config configs/data/sft.yaml
-
-# 4. Retry failed samples, then re-validate
-#    stage: regenerate
-python scripts/generate.py --config configs/data/sft.yaml
+python scripts/prepare_quality_data.py sft --source datasets/sft/train.jsonl \
+  --output datasets/sft/quality_train.jsonl \
+  --rejected results/sft_quality_rejected.jsonl
+python scripts/prepare_quality_data.py sft --source datasets/sft/val.jsonl \
+  --output datasets/sft/quality_val.jsonl \
+  --rejected results/sft_quality_val_rejected.jsonl
 ```
 
-`append: true` resumes into an existing `prompts_file`, `samples_file`, or
-`output` JSONL: only the remaining rows up to `count` are generated, and task
-ids already on disk are skipped.
+For an additional behavioral check of any SFT file, add `--check-execution
+--backend node --validation-config configs/data/sft.yaml` to `validate_data.py`.
+That CLI currently uses the executor's default two-cycle window; use
+`prepare_quality_data.py sft` for the stricter eight-cycle quality pass. Either
+way, re-executing every row can take several minutes.
 
-Set `batch.enabled: false` to use synchronous generation. With
-`parallel_models: true`, teacher generation shards tasks across all enabled
-models and runs them concurrently.
+### Frozen benchmark
 
-Each RL task row stores `prompt_author` (`model_id`, `provider`, `model`,
-optional `style`). Each SFT row stores the same under `metadata.prompt_author`
-and teacher provenance under `metadata.teacher`, `metadata.teacher_provider`,
-and `metadata.teacher_model`.
-
-Compose SFT acceptance requires executable `strudel_code` and `controls`
-consistent with execution. Hidden brief constraints are recorded in
-`constraint_score` but do not block teacher rows; RL/GRPO still scores
-constraints.
-
-SFT compose prompts use a two-step pattern:
-
-1. **Brief** — each compose row samples level 1–4 (biased toward vaguer levels
-   via `compose.prompt_level_weights`), mood, instruments, tempo, and optional
-   hints procedurally. Tempo and instruments feed **constraints** for validation
-   and rewards only.
-2. **Prompt author** — models under `compose.prompt_author.models` turn scene
-   hints (mood, atmosphere, creative hints) into a short user-style request.
-   The author never sees BPM, instrument lists, or constraint JSON. Training
-   messages match inference: the response model sees only the natural-language
-   prompt (plus edit/repair code context when applicable).
-
-Prompt authoring can use a separate `compose.prompt_author.models` router from
-teacher `models`. Legacy `providers:` blocks are still accepted and are converted
-to model ids automatically.
-
-For a local SFT smoke test without API keys, use `datasets/sft/sample.jsonl` with
-`configs/gemma4_4b/smoke_sft.yaml` or `configs/qwen3_06b/smoke_sft.yaml`.
-
-## 4. Run SFT
-
-Dry-run locally before launching on a GPU:
+Only run these when creating the benchmark for the first time. The first
+command generates 200 procedural tasks; the second adds 20 fixed user-style
+requests. Keep `benchmark_ready.jsonl` unchanged for checkpoint comparisons.
 
 ```bash
+python scripts/generate.py --config configs/data/benchmark.yaml
+python scripts/build_quality_benchmark.py
+python scripts/validate_data.py --input datasets/evaluation/benchmark_ready.jsonl \
+  --kind rl --disjoint-from datasets/rl/quality_train.jsonl \
+  --min-unique-prompts 0.95
+```
+
+## Train on a local GPU
+
+The quality SFT config loads the existing `checkpoints/gemma4-4b-sft` adapter
+as trainable weights and starts a new optimizer run on the curated data. It is
+not a resume of the old optimizer/scheduler state. Gemma GRPO instead starts
+from the public, merged quality SFT model named in `configs/gemma4_4b/grpo.yaml`.
+It downloads that model from Hugging Face and trains a new LoRA adapter on top;
+the local SFT adapter is not needed for GRPO. Change `model.name` in that config
+to evaluate another merged SFT checkpoint as the RL starting point.
+
+```bash
+# Small integration checks (CUDA required for actual training).
 python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml --dry-run
-```
-
-```bash
-python scripts/train.py --config configs/gemma4_4b/sft.yaml
-```
-
-Checkpoints land in `checkpoints/gemma4-4b-sft/`. For a quick smoke run:
-
-```bash
-python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml
-```
-
-## 5. Run GRPO
-
-Generate the RL task bank and an SFT checkpoint first. Dry-run locally:
-
-```bash
 python scripts/train.py --config configs/gemma4_4b/smoke_grpo.yaml --dry-run
-```
 
-Then on a GPU:
+# Original SFT, if starting from the base model.
+python scripts/train.py --config configs/gemma4_4b/sft.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/sft.yaml
 
-```bash
+# Continue from the existing SFT adapter on the curated set.
+python scripts/train.py --config configs/gemma4_4b/sft_quality.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/sft_quality.yaml
+
+# Run a 60-step GRPO pilot; inspect task-specific validation before a full run.
+python scripts/train.py --config configs/gemma4_4b/grpo_pilot.yaml --dry-run
+python scripts/train.py --config configs/gemma4_4b/grpo_pilot.yaml
 python scripts/train.py --config configs/gemma4_4b/grpo.yaml
 ```
 
-Smoke test:
+GRPO holds out 30 of the 3,000 RL tasks using the configured seed, stratified
+to 18 compose, 6 edit, and 6 repair tasks. Held-out rows are excluded before
+the remaining compose rows are repeated twice for training (75% compose
+exposure). The 60-step pilot validates and saves at steps 12, 24, 36, 48, and
+60; the full 200-step run validates and saves at steps 40, 80, 120, 160,
+and 200. Both use two generations per validation prompt. Preflight requires
+`save_steps == eval_steps` and enough checkpoint slots to retain every
+validation point for best-checkpoint selection.
+
+In W&B, TRL's `reward`/`eval_reward` is the **unweighted** total. The
+counts-aware metrics `objective/weighted_reward` and
+`eval_objective/weighted_reward` reflect the configured GRPO reward weights;
+JarvisLabs selects the best new GRPO checkpoint by the latter. Individual
+reward terms appear under `rewards/<function_name>/mean` and `/std` (with
+`eval_` prefixes during validation), with `reward_terms/<name>/applicable_count`
+showing how many completions each term scored. `task/<type>/...` metrics
+separate compose, edit, and repair playability and reward; validation keys
+begin with `eval_task/`. These counters replace TRL's `NaN` aggregates for
+conditionally applicable rewards without treating inapplicable tasks as zero.
+Older GRPO runs without a weighted metric still use `eval_reward` when fetched.
+Do not compare the completed 2026-09-28 pilot's reward curve directly with a
+run using the revised sampling mix. Review task-specific validation and the
+frozen benchmark before scaling to the full run. For Qwen3
+0.6B, use the matching `configs/qwen3_06b/{smoke_sft,sft,smoke_grpo,grpo}.yaml`
+configs. To resume an *interrupted run of the same config and dataset*, set
+`training.resume_from_checkpoint` to that run's checkpoint in YAML; do not set
+it when beginning the new quality SFT run.
 
 ```bash
-python scripts/train.py --config configs/gemma4_4b/smoke_grpo.yaml
+# Qwen3 baseline, if using that model instead of Gemma 4.
+python scripts/train.py --config configs/qwen3_06b/sft.yaml
+python scripts/train.py --config configs/qwen3_06b/grpo.yaml
 ```
 
-Default rewards:
+## Evaluate locally or from Hugging Face
 
-```text
-0.1 × format
-0.4 × execution            (executes AND produces at least one event)
-0.5 × constraints          (only constraints the prompt states)
-0.5 × edit consistency     (edit examples only)
-0.5 × repair consistency   (repair examples only)
-0.2 × richness             (compose only: sound in every cycle + variation across cycles)
-```
-
-How the rewards stay honest:
-
-- **Stated constraints only.** Before training, `prepare_rl_row` drops any
-  constraint the prompt does not state: tempo needs a number followed by "BPM",
-  instruments must be named (aliases and plurals count, e.g. "hi-hats", "claps"),
-  and layer limits need an explicit count ("at least 3 layers"). Vague `scene` /
-  `musician` prompts are therefore scored on execution and richness only. The
-  task bank keeps the full verifier fields; only the reward view is pruned.
-- **Playable, not just valid.** A program that runs but is silent earns no
-  execution, constraint, edit, repair, or richness reward.
-- **Features come from what plays.** With the Node backend, `instruments` lists
-  sounds that produce audible events, so unused `const`s or `gain(0)` layers do
-  not satisfy an instrument constraint. `layer_count` is the widest `stack(...)`
-  argument count, not the number of quoted strings.
-- **Richness** (`src/tunelm/rewards/richness.py`) averages coverage (share of the
-  queried cycles with sound) and variation (distinct per-cycle patterns, full
-  credit at 4). It counters the pull toward short one-bar loops that execution
-  alone creates. Keep its weight small; random functions can inflate variation.
-
-The full GRPO configs query **8 cycles** (`strudel.cycles: 8`,
-`max_events: 8192`) so later `arrange`/`<...>` sections are executed and
-scored, and sample **8 completions for each of 4 prompts** per optimizer step
-(`per_device_train_batch_size: 4`, `gradient_accumulation_steps: 8`,
-`num_generations: 8`). TRL's default `beta: 0` (no KL term) is kept on purpose:
-with a PEFT adapter, TRL's reference model is the base model with the adapter
-disabled, so a KL term would pull toward base Gemma rather than the SFT policy.
-
-## 6. Evaluate a checkpoint
+`configs/eval/default.yaml` uses the frozen 220-task benchmark and Node
+execution. Use unique `--predictions` and `--output` paths per checkpoint and
+decoding setting. `--checkpoint` accepts a local adapter directory or a merged
+Hugging Face model repo ID. For private Hub repos, set `HF_TOKEN`. `--revision`
+pins a Hub branch, tag, or commit for both model and tokenizer.
 
 ```bash
-python scripts/train.py \
-  --config configs/eval/default.yaml \
-  --checkpoint checkpoints/gemma4-4b-grpo
+# Fast smoke run; then remove --limit for the full benchmark.
+python scripts/train.py --config configs/eval/default.yaml \
+  --checkpoint checkpoints/gemma4-4b-sft --limit 20 \
+  --temperature 0 --max-new-tokens 3072 \
+  --predictions results/pred_sft_smoke.jsonl \
+  --output results/eval_sft_smoke.jsonl
+
+# Same benchmark directly from a merged model uploaded to Hugging Face.
+python scripts/train.py --config configs/eval/default.yaml \
+  --checkpoint OWNER/MERGED_MODEL --revision COMMIT_OR_TAG \
+  --temperature 0 --max-new-tokens 3072 \
+  --predictions results/pred_hf_t0.jsonl \
+  --output results/eval_hf_t0.jsonl
+
+# Plan/code ablation with the same model; use new output paths.
+python scripts/train.py --config configs/eval/default.yaml \
+  --checkpoint OWNER/MERGED_MODEL --mode code-first \
+  --predictions results/pred_hf_code_first.jsonl \
+  --output results/eval_hf_code_first.jsonl
 ```
 
-Use `--limit 10` for a smoke test. Outputs:
-
-- `results/evaluation.jsonl`: per-task reward breakdown
-- `results/evaluation.summary.json`: metric means and task-type slices
-
-## 7. Interactive checkpoint inference
+The scorer writes `OUTPUT.summary.json` and `OUTPUT.review.csv` alongside
+`OUTPUT.jsonl` (for example, `results/eval_hf_t0.summary.json`). Fill the review
+CSV's `audible` (0/1), `instruction_match` (1-5), and `musical_quality` (1-5)
+columns after listening, then score the saved predictions again **without**
+`--checkpoint` to aggregate manual scores:
 
 ```bash
-python scripts/infer.py \
-  "Create a slow emotional piano piece with subtle strings" \
-  --checkpoint checkpoints/gemma4-4b-grpo
+python scripts/train.py --config configs/eval/default.yaml \
+  --predictions results/pred_hf_t0.jsonl --output results/eval_hf_t0.jsonl
 ```
 
-## JarvisLabs training
+Automatic execution and form metrics are proxies, not listening
+tests. Compare temperatures (`0`, `0.2`, `0.7`) and `combined` versus
+`code-first` using distinct paths; avoid choosing by reward alone.
 
-Run SFT and GRPO as explicit, inspectable stages. Each run uploads the dataset
-selected by its config; GRPO also uploads its local SFT adapter when present.
+To listen to saved predictions, open `tools/sft_player.html` and select a
+benchmark `predictions.jsonl` with **Load JSONL**. When opening the HTML file
+directly, select `datasets/evaluation/benchmark_ready.jsonl` with **Load
+benchmark tasks** to show prompts and edit/repair context. When served from
+the repository root, the player loads that task file automatically. Malformed
+completions remain visible as raw text for inspection.
 
-Prerequisites:
-
-- [JarvisLabs CLI](https://docs.jarvislabs.ai/): `uv tool install jarvislabs` then `jl setup`
-- `.env` / `.env.local` with `WANDB_API_KEY` for full runs; optionally set
-  `WANDB_ENTITY`, `WANDB_RUN_GROUP`, and `HF_TOKEN`. Full configs set
-  `training.wandb_project` (default `tunelm`) and `training.run_name` for the
-  W&B project and run title. Shell env vars override the YAML when both are set.
-- A registered SSH key is needed for JarvisLabs VMs, not the default PyTorch
-  container. The `jl` CLI handles SSH authentication for containers.
+Score already saved Modal JSONL without loading any model or GPU:
 
 ```bash
-python3 scripts/jarvislabs/cloud_train.py self-check \
+python scripts/train.py --config configs/eval/default.yaml \
+  --tasks results/modal_inference_songs.jsonl \
+  --predictions results/modal_inference_songs.jsonl \
+  --output results/audit_songs.jsonl
+```
+
+## Infer locally
+
+`scripts/infer.py` accepts a local checkpoint or merged Hub repo ID. It runs
+Node Strudel verification and retries a parse/compile failure twice by default.
+`--mode code-first` is an ablation using the same model, not a separately
+trained planner/code model.
+
+```bash
+python scripts/infer.py 'Gentle piano that gradually builds' \
+  --checkpoint checkpoints/gemma4-4b-sft-quality \
+  --temperature 0.2 --compile-retries 2
+python scripts/infer.py 'A short drum loop' \
+  --checkpoint OWNER/MERGED_MODEL --mode code-first
+```
+
+`--no-validate` skips execution and retries only parsing failures. Local
+inference needs a GPU for the supplied Gemma checkpoint; a Hugging Face model
+still downloads its weights to the machine running this command.
+
+## JarvisLabs: train and manage instances
+
+Install the JarvisLabs CLI (`uv tool install jarvislabs`, then `jl setup`) and
+check GPU availability/pricing with `jl gpus` before provisioning. The helper
+stages only the selected data/adapter, runs remote setup, follows training,
+downloads checkpoints/results, and pauses the GPU by default. Full configs use
+W&B, so set `WANDB_API_KEY`; publishing models needs an `HF_TOKEN` with write access.
+
+```bash
+python scripts/jarvislabs/cloud_train.py self-check \
+  --config configs/gemma4_4b/sft_quality.yaml
+# Original SFT only when starting from the base model.
+python scripts/jarvislabs/cloud_train.py run \
   --config configs/gemma4_4b/sft.yaml
-
-# SFT smoke on the default A100-80GB
-python3 scripts/jarvislabs/cloud_train.py run \
-  --config configs/gemma4_4b/smoke_sft.yaml
-
-# Full SFT; on success downloads checkpoints/, promotes the lowest-loss
-# checkpoint to results/<run_name>/best/, then pauses the instance
-python3 scripts/jarvislabs/cloud_train.py run \
-  --config configs/gemma4_4b/sft.yaml
-
-# Same run, destroy the instance only after a successful download
-python3 scripts/jarvislabs/cloud_train.py run \
-  --config configs/gemma4_4b/sft.yaml \
-  --destroy
-
-# Full GRPO after inspecting the downloaded SFT adapter
-python3 scripts/jarvislabs/cloud_train.py run \
-  --config configs/gemma4_4b/grpo.yaml \
-  --keep
+python scripts/jarvislabs/cloud_train.py run \
+  --config configs/gemma4_4b/sft_quality.yaml
+python scripts/jarvislabs/cloud_train.py run \
+  --config configs/gemma4_4b/grpo_pilot.yaml
+# Only after the pilot improves held-out results:
+python scripts/jarvislabs/cloud_train.py run \
+  --config configs/gemma4_4b/grpo.yaml
 ```
 
-Training routes from config contents, not the filename. A fresh GRPO instance
-requires the SFT adapter under the configured local `checkpoints/` path. Reusing
-the SFT machine with `--on MACHINE_ID` also preserves its remote checkpoint.
-Metrics and sampled GRPO completions go to W&B for the full configs. Set
-`WANDB_LOG_MODEL=checkpoint` only when checkpoint artifact uploads are desired;
-the launcher always downloads checkpoint files directly. Other commands:
+The default is an A100-80GB with 100 GB storage. Use `--gpu GPU`, `--storage
+GB`, or `--region REGION` to change provisioning. `--on MACHINE_ID` resumes a
+paused machine; `--skip-setup` is for a machine already set up with the current
+dependencies. `--keep` leaves the GPU running and accruing charges. Without
+`--keep`, successful runs pause it after results are downloaded. `--destroy`
+deletes the instance only after a successful training download.
 
 | Command | Purpose |
-|---------|---------|
-| `fetch --on MACHINE_ID` | Download `checkpoints/` and copy best adapter to `results/<run_name>/best/` |
-| `publish --scope best-and-final` | Merge best + final adapters on JarvisLabs and push to private Hugging Face repos |
-| `status --on MACHINE_ID` | Show saved session and instance status |
-| `down --on MACHINE_ID` | Pause instance (`--destroy` to delete) |
+|---|---|
+| `cloud_train.py status --on MACHINE_ID` | Show instance and saved-run status |
+| `cloud_train.py fetch --on MACHINE_ID --config CONFIG` | Fetch training checkpoints and promote the best adapter |
+| `cloud_train.py down --on MACHINE_ID` | Pause the instance |
+| `cloud_train.py down --on MACHINE_ID --destroy` | Permanently remove the instance |
+| `cloud_train.py self-check --config CONFIG` | Verify the staged training payload locally |
 
-Session state is stored in `results/.jarvislabs_session.json`.
+Training fetches the highest weighted-validation-reward GRPO adapter (or
+lowest-eval-loss SFT adapter) to
+`results/<run_name>/best/`; the final adapter is under its configured
+`checkpoints/` output. Session metadata is in
+`results/.jarvislabs_session.json`.
 
-The default new instance is one on-demand `A100-80GB` with 100 GB storage.
-The 80 GB headroom is intentional for Gemma E4B's 8B total weights, 8,192-token
-SFT examples, and eight-way GRPO generation for four prompts per step. Run `jl gpus` before provisioning
-to check current availability and your account's local-currency price. As of
-September 2026, [JarvisLabs pricing](https://jarvislabs.ai/pricing) lists
-$1.49 or [₹141](https://jarvislabs.ai/in) per GPU-hour, plus storage at
-$0.10/GB-month or ₹0.013/GB-hour. A preliminary **20–80 GPU-hour** allowance
-for both stages is about **$30–$120 or ₹2,820–₹11,280 compute**, before storage,
-taxes, or extra experiments. This is a planning range, not a measured runtime;
-use the smoke run's tokens/second and GRPO seconds/step to revise it. A paused
-100 GB instance continues to cost about $10/month or ₹31/day until destroyed.
-`--destroy` is honored only after a successful run and checkpoint download;
-otherwise the instance is paused so artifacts remain recoverable.
+## Publish a merged model to Hugging Face
 
-The 5,000-row SFT dataset was measured with the Gemma E4B tokenizer and chat
-template: maximum prompt + completion is 6,513 tokens. All ten smoke SFT
-examples exceed 2,048 tokens; the 4,096-token smoke limit now fits all ten.
-The 8,192-token full SFT limit fits all 5,000. RL prompts peak at 2,303 tokens;
-the 2,048-token GRPO completion cap covers 97.8% of the SFT compose response
-lengths and keeps the maximum prompt + completion at 4,351, far below Gemma's
-native 128K context. `model.max_seq_length` is SFT-only; current TRL GRPO
-uses `training.max_completion_length` and the model's native context. Longer sampled
-GRPO completions are masked rather than optimized as truncated outputs.
-Provider `max_tokens` in `configs/data/` controls generation during dataset
-creation and is not a model training context limit.
-The Qwen3-0.6B tokenizer independently measured a 6,427-token SFT maximum;
-its full and smoke SFT limits were raised to 8,192 and 4,096 as well.
-The densest SFT example has 270 events over two verifier cycles, so the eight
-cycles used by GRPO and evaluation stay under the 8,192-event cap. The GRPO
-Node verifier timeout is five seconds; cloud timings still need checking.
-
-## Publish and Modal inference
-
-Keep merged Gemma weights off your laptop. Download adapters only (~35–83 MB),
-merge on a JarvisLabs GPU, publish each meaningful checkpoint to its own
-**private** Hugging Face repo, then point Modal at that repo id.
-
-Prerequisites:
-
-- `HF_TOKEN` with write access in `.env` / `.env.local` (JarvisLabs publish +
-  Modal private-repo download)
-- Optional `HF_USERNAME` when your token namespace differs from the repo owner
-- [Modal](https://modal.com/) account with GPU billing: `pip install -e '.[modal]'`
-  then `modal setup`. Add a payment method in Modal settings before deploying GPU
-  endpoints (`A10G` is used by default).
-- Modal secret named `tunelm` containing at least `HF_TOKEN`
-
-### 1. Publish merged checkpoints from JarvisLabs
-
-After SFT finishes and adapters are fetched locally, publish the best-by-eval
-and final checkpoints (at most two repos per run):
+The training artifact is a LoRA adapter. `publish` merges it with the base
+model on a JarvisLabs GPU and uploads only the merged model plus tokenizer to
+Hugging Face, not the adapter. Repos are private unless `--public` is set. The
+publish manifest is appended to
+`results/published_models.jsonl`. Set `HF_TOKEN` with write access first.
 
 ```bash
-python3 scripts/jarvislabs/cloud_train.py publish \
-  --scope best-and-final \
-  --config configs/gemma4_4b/sft.yaml \
-  --on MACHINE_ID
+export HF_TOKEN='...'
+# Publish one selected adapter under a chosen repo ID.
+python scripts/jarvislabs/cloud_train.py publish --scope single \
+  --adapter results/gemma4-4b-sft-quality/best \
+  --repo-id OWNER/tunelm-sft-quality --public
+
+# Or publish both best and final from a completed training run.
+python scripts/jarvislabs/cloud_train.py publish --scope best-and-final \
+  --config configs/gemma4_4b/sft_quality.yaml --public
 ```
 
-Or publish one adapter directory:
+`--on MACHINE_ID` reuses a GPU; otherwise `publish` creates and later pauses
+one. `--scope single` may also point at `checkpoints/gemma4-4b-sft` or a
+`checkpoint-N` adapter directory. On an already prepared GPU shell, the
+lower-level equivalent is:
 
 ```bash
-python3 scripts/jarvislabs/cloud_train.py publish \
-  --scope single \
-  --adapter results/gemma4-4b-sft/best \
-  --tag best \
-  --step 564 \
-  --on MACHINE_ID
+python scripts/jarvislabs/publish_model.py \
+  --adapter checkpoints/gemma4-4b-sft-quality \
+  --repo-id OWNER/tunelm-sft-quality --public
 ```
 
-Each publish job uploads only the adapter (~100 MB) to the instance, downloads
-the base model to ephemeral disk, merges, and pushes ~16 GB to Hugging Face.
-Repo ids default to `{username}/tunelm-{run_name}-YYYYMMDD-{step}-{best|final}`.
-Successful publishes append one JSON line per repo to
-`results/published_models.jsonl`.
+Do not pass a bare LoRA-only repo to the merged-model examples below.
 
-GRPO still uses the local adapter path from `configs/gemma4_4b/grpo.yaml`.
-Published HF repos are for merged inference and Modal serving only.
+## JarvisLabs: benchmark Hub checkpoints
 
-### 2. Deploy Modal endpoint from Hugging Face
-
-Set the repo id from the publish output (example):
+`benchmark` stages the fixed evaluation set and code, not local weights. It
+loads the merged model from Hugging Face on the GPU, scores predictions with
+the Node verifier, downloads results, and pauses the instance. Give every
+model/temperature/mode a unique label. For private or gated repos, `HF_TOKEN`
+is forwarded from the shell or local `.env` to the machine.
 
 ```bash
-export TUNELM_HF_REPO=your-username/tunelm-gemma4-4b-sft-20250920-564-best
-# optional: export TUNELM_HF_REVISION=abc123
+# New machine and a 20-task smoke check.
+python scripts/jarvislabs/cloud_train.py benchmark \
+  --checkpoint OWNER/tunelm-sft --label sft-smoke-t0 --limit 20
 
+# Reuse the printed ID. Default: full 220-task benchmark at temperature 0.
+python scripts/jarvislabs/cloud_train.py benchmark --on MACHINE_ID --skip-setup \
+  --checkpoint OWNER/tunelm-sft --revision COMMIT_OR_TAG --label sft-full-t0
+python scripts/jarvislabs/cloud_train.py benchmark --on MACHINE_ID --skip-setup \
+  --checkpoint OWNER/tunelm-sft-quality --label quality-full-t0 \
+  --results-dir results/gemma4-4b-sft/benchmarks
+
+# Same checkpoint, different decoding; keep outputs separate.
+python scripts/jarvislabs/cloud_train.py benchmark --on MACHINE_ID --skip-setup \
+  --checkpoint OWNER/tunelm-sft-quality --label quality-code-first \
+  --temperature 0.2 --mode code-first --max-new-tokens 3072
+```
+
+Outputs are in `results/benchmarks/LABEL/` by default, or under
+`--results-dir/LABEL/`: `predictions.jsonl`,
+`evaluation.jsonl`, `evaluation.summary.json`, `evaluation.review.csv`, and
+`run.json` (repo, revision, decoding settings, run ID). `--config` selects a
+different evaluation YAML, `--keep` leaves the GPU running, and `--overwrite`
+explicitly permits reusing a local result label. Do not use `--skip-setup` on a
+new machine. A paused instance may still incur storage charges; use `down
+--destroy` after its artifacts have been downloaded.
+Each full run generates responses sequentially for 220 tasks; SFT eval loss
+does not generate responses. Several benchmarks can share an A100-80GB, but
+four merged E4B models use roughly 65 GB before generation overhead. Avoid
+loading a fifth concurrently, and keep `--keep` on every shared-instance run
+until all results have been downloaded.
+
+After filling the downloaded review CSV, aggregate its human ratings locally
+without renting the GPU again:
+
+```bash
+python scripts/train.py --config configs/eval/default.yaml \
+  --predictions results/benchmarks/sft-full-t0/predictions.jsonl \
+  --output results/benchmarks/sft-full-t0/evaluation.jsonl
+```
+
+## Modal: serve and inspect a Hub model
+
+Modal serves a merged Hugging Face model, not the local LoRA adapter. Install
+the Modal extra (see Setup), run `modal setup`, and create a Modal secret named
+`tunelm` with `HF_TOKEN` for private repos. The deploy output gives the endpoint
+URL. Set `TUNELM_HF_REVISION` to pin a model version.
+
+```bash
+export TUNELM_HF_REPO=OWNER/tunelm-sft-quality
+# Optional: export TUNELM_HF_REVISION=COMMIT_OR_TAG
 modal deploy scripts/modal/app.py
+
+# One prompt, with client-side Node validation and compile retries.
+python scripts/modal/infer.py 'Slow piano at dawn' --url https://YOUR-ENDPOINT \
+  --output results/modal_one.jsonl --temperature 0.2 --compile-retries 2
+
+# Batch from a TuneLM JSONL file; --samples alone uses datasets/sft/sample.jsonl.
+python scripts/modal/infer.py --samples datasets/evaluation/benchmark_ready.jsonl \
+  --url https://YOUR-ENDPOINT --output results/modal_benchmark.jsonl
+
+# With no prompt or --samples, run the fixed prompts in eval/manual_prompts.py.
+python scripts/modal/infer.py --url https://YOUR-ENDPOINT \
+  --output results/modal_manual.jsonl
 ```
 
-The Modal class loads `TUNELM_HF_REPO` at container start via
-`AutoModelForCausalLM.from_pretrained`. Redeploy with a different repo id to
-switch checkpoints. Strudel validation in the endpoint defaults off; pass
-`"run_validation": true` in the POST body or set `TUNELM_VALIDATE=1` when deploying.
-Default generation uses `7168` new tokens (`8192` SFT max seq length minus
-prompt headroom); retries once at `8192` when JSON parsing fails.
-
-### 3. Call the endpoint locally
-
-```bash
-python3 scripts/modal/infer.py "slow piano at dawn" \
-  --url https://your-workspace--tunelm-tunelminference-generate.modal.run
-
-# Batch from a TuneLM JSONL file (defaults to datasets/sft/sample.jsonl).
-# Writes train.jsonl-compatible rows to results/modal_inference.jsonl.
-python3 scripts/modal/infer.py --samples --url https://...
-
-# Or edit MANUAL_PROMPTS at the top of scripts/modal/infer.py and run:
-python3 scripts/modal/infer.py --url https://...
-```
-
-Response shape matches [`tunelm.inference.generate`](src/tunelm/inference.py):
-parsed Strudel JSON plus optional static validation when requested.
+`--limit N`, `--max-new-tokens N`, and `--timeout SECONDS` control the client.
+`--validate` also requests the endpoint's static check; the client's Node
+result is the authoritative execution result. The saved rows include fresh
+`metadata.valid`, validation details, and inference attempt counts. Score a
+saved Modal batch with the `--tasks FILE --predictions FILE` evaluation command
+above. The Modal endpoint does not render audio.
 
 ## Troubleshooting
 
-`Cannot find package '@strudel/core'`
-: Run `npm install` from the repository root.
-
-`..._API_KEY is required`
-: Export the key or disable that provider in the data config.
-
-CUDA/bitsandbytes errors
-: Install CUDA-matched `torch` and `bitsandbytes` on the GPU machine.
-
-Many valid-syntax programs score zero constraints
-: Inspect returned `features`. The analyzer only verifies explicit tempo,
-  instruments/samples that actually sound, and `stack(...)` layer count.
-
-Compose tasks never get a constraint reward during GRPO
-: Their prompts do not state the constraints (vague `scene`/`musician` styles).
-  Regenerate the RL bank with the `brief` compose style enabled.
+- `Cannot find package '@strudel/core'`: run `npm install` at the repo root.
+- Missing API key: export the provider key for data generation, `WANDB_API_KEY`
+  for W&B-backed cloud training, or `HF_TOKEN` for private Hub models.
+- CUDA/bitsandbytes failure: install a CUDA-compatible PyTorch stack on the GPU
+  machine; local dataset checks do not require CUDA.
+- Good automatic scores but weak music: review the generated Strudel in a
+  browser player and fill the listening-review CSV. Execution and form scores
+  do not measure taste or instruction fit reliably.

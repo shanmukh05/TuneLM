@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -114,6 +116,20 @@ def stage_payload(root: Path, dest: Path, config_path: str) -> None:
         output_dir = training.get("output_dir")
         if output_dir and (root / output_dir).is_dir():
             _copy_into_payload(root, dest, output_dir)
+    for name in ("pyproject.toml", "package.json", "package-lock.json", "README.md"):
+        source = root / name
+        if source.is_file():
+            shutil.copy2(source, dest / name)
+
+
+def stage_eval_payload(root: Path, dest: Path, config_path: str) -> None:
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    for name in ("src", "configs", "scripts"):
+        shutil.copytree(root / name, dest / name, ignore=_ignore)
+    config = load_config(root / config_path)
+    _copy_into_payload(root, dest, config["tasks"])
     for name in ("pyproject.toml", "package.json", "package-lock.json", "README.md"):
         source = root / name
         if source.is_file():
@@ -252,6 +268,29 @@ def remote_train_shell(remote_root: str, config: str) -> str:
     )
 
 
+def remote_eval_shell(remote_root: str, args: argparse.Namespace) -> str:
+    output_dir = f"{args.results_dir}/{args.label}"
+    command = [
+        ".venv/bin/python", "scripts/train.py", "--config", args.config,
+        "--checkpoint", args.checkpoint,
+        "--predictions", f"{output_dir}/predictions.jsonl",
+        "--output", f"{output_dir}/evaluation.jsonl",
+        "--temperature", str(args.temperature),
+        "--max-new-tokens", str(args.max_new_tokens),
+        "--mode", args.mode,
+    ]
+    if args.revision:
+        command.extend(["--revision", args.revision])
+    if args.limit is not None:
+        command.extend(["--limit", str(args.limit)])
+    quoted = " ".join(shlex.quote(part) for part in command)
+    return (
+        f"set -euo pipefail; cd {shlex.quote(remote_root)}; "
+        "if [ -f .remote.env ]; then set -a; . ./.remote.env; set +a; fi; "
+        f"exec {quoted}"
+    )
+
+
 def start_train(machine_id: str, remote_root: str, config: str) -> str:
     shell = remote_train_shell(remote_root, config)
     payload = jl_json(
@@ -290,6 +329,33 @@ def _checkpoint_eval_loss(checkpoint_dir: Path) -> float | None:
     return losses[-1] if losses else None
 
 
+def _checkpoint_eval_reward(checkpoint_dir: Path) -> float | None:
+    state_path = checkpoint_dir / "trainer_state.json"
+    if not state_path.is_file():
+        return None
+    log_history = json.loads(state_path.read_text(encoding="utf-8")).get("log_history") or []
+    rewards = [
+        float(entry["eval_reward"])
+        for entry in log_history
+        if "eval_reward" in entry and math.isfinite(float(entry["eval_reward"]))
+    ]
+    return rewards[-1] if rewards else None
+
+
+def _checkpoint_eval_weighted_reward(checkpoint_dir: Path) -> float | None:
+    state_path = checkpoint_dir / "trainer_state.json"
+    if not state_path.is_file():
+        return None
+    log_history = json.loads(state_path.read_text(encoding="utf-8")).get("log_history") or []
+    key = "eval_objective/weighted_reward"
+    rewards = [
+        float(entry[key])
+        for entry in log_history
+        if key in entry and math.isfinite(float(entry[key]))
+    ]
+    return rewards[-1] if rewards else None
+
+
 def _checkpoint_train_loss(checkpoint_dir: Path) -> float | None:
     state_path = checkpoint_dir / "trainer_state.json"
     if not state_path.is_file():
@@ -310,7 +376,7 @@ def _checkpoint_step(path: Path) -> int | None:
 
 
 def promote_best_checkpoint(root: Path, config: dict) -> Path:
-    """Copy the lowest eval-loss checkpoint (or train-loss fallback) into results/."""
+    """Promote by weighted GRPO validation reward or SFT eval loss."""
     training = config.get("training", {})
     output_rel = str(training.get("output_dir", "checkpoints/sft"))
     output_dir = (root / output_rel).resolve()
@@ -322,8 +388,29 @@ def promote_best_checkpoint(root: Path, config: dict) -> Path:
     candidates = sorted(output_dir.glob("checkpoint-*"), key=lambda path: path.name)
     best_source: Path | None = None
     best_eval_loss: float | None = None
+    best_eval_reward: float | None = None
+    best_eval_weighted_reward: float | None = None
     best_train_loss: float | None = None
+    is_grpo = bool(config.get("rewards"))
+    has_weighted_reward = is_grpo and any(
+        _checkpoint_eval_weighted_reward(checkpoint) is not None for checkpoint in candidates
+    )
     for checkpoint in candidates:
+        if is_grpo:
+            eval_reward = (
+                _checkpoint_eval_weighted_reward(checkpoint)
+                if has_weighted_reward
+                else _checkpoint_eval_reward(checkpoint)
+            )
+            best_score = best_eval_weighted_reward if has_weighted_reward else best_eval_reward
+            if eval_reward is not None and (best_score is None or eval_reward > best_score):
+                if has_weighted_reward:
+                    best_eval_weighted_reward = eval_reward
+                    best_eval_reward = _checkpoint_eval_reward(checkpoint)
+                else:
+                    best_eval_reward = eval_reward
+                best_source = checkpoint
+            continue
         eval_loss = _checkpoint_eval_loss(checkpoint)
         if eval_loss is not None and (best_eval_loss is None or eval_loss < best_eval_loss):
             best_eval_loss = eval_loss
@@ -336,18 +423,30 @@ def promote_best_checkpoint(root: Path, config: dict) -> Path:
             best_train_loss = train_loss
             best_source = checkpoint
 
+    if best_source is None and is_grpo and candidates:
+        best_source = candidates[-1]
     if best_source is None and _is_adapter_dir(output_dir):
         best_source = output_dir
     if best_source is None:
         raise RuntimeError(f"no adapter checkpoint found under {output_rel}")
 
     shutil.copytree(best_source, dest)
+    has_eval_score = any(
+        score is not None
+        for score in (best_eval_loss, best_eval_reward, best_eval_weighted_reward)
+    )
     manifest = {
         "run_name": run_name,
         "source": str(best_source.relative_to(root)),
         "destination": str(dest.relative_to(root)),
         "best_eval_loss": best_eval_loss,
-        "best_train_loss": best_train_loss if best_eval_loss is None else _checkpoint_train_loss(best_source),
+        "best_eval_reward": best_eval_reward,
+        "best_eval_weighted_reward": best_eval_weighted_reward,
+        "selection_metric": (
+            "eval_objective/weighted_reward" if has_weighted_reward else
+            "eval_reward" if is_grpo else "eval_loss"
+        ),
+        "best_train_loss": _checkpoint_train_loss(best_source) if has_eval_score else best_train_loss,
     }
     manifest_path = root / "results" / run_name / "best_manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -454,7 +553,13 @@ def append_published_manifest(root: Path, records: list[dict[str, Any]]) -> Path
     return path
 
 
-def remote_publish_shell(remote_root: str, target: dict[str, Any], *, repo_id: str | None) -> str:
+def remote_publish_shell(
+    remote_root: str,
+    target: dict[str, Any],
+    *,
+    repo_id: str | None,
+    public: bool = False,
+) -> str:
     command = [
         ".venv/bin/python",
         "scripts/jarvislabs/publish_model.py",
@@ -471,6 +576,8 @@ def remote_publish_shell(remote_root: str, target: dict[str, Any], *, repo_id: s
         command.extend(["--eval-loss", str(target["eval_loss"])])
     if repo_id:
         command.extend(["--repo-id", repo_id])
+    if public:
+        command.append("--public")
     quoted = " ".join(shlex.quote(part) for part in command)
     return (
         f"set -euo pipefail; cd {shlex.quote(remote_root)}; "
@@ -623,6 +730,76 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    root = repo_root()
+    load_local_env(root)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.label):
+        raise ValueError("--label must contain only letters, digits, dots, underscores, or hyphens")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", args.checkpoint):
+        raise ValueError("--checkpoint must be a Hugging Face repo ID like owner/model")
+    if args.limit is not None and args.limit < 1:
+        raise ValueError("--limit must be positive")
+    results_dir = (root / args.results_dir).resolve()
+    if Path(args.results_dir).is_absolute() or not results_dir.is_relative_to(root) or results_dir == root:
+        raise ValueError("--results-dir must be a directory inside the repository")
+    config_path = root / args.config
+    if not config_path.is_file() or "tasks" not in load_config(config_path):
+        raise ValueError(f"evaluation config not found or missing tasks: {args.config}")
+    output_dir = results_dir / args.label
+    if output_dir.exists() and not args.overwrite:
+        raise FileExistsError(f"Refusing to overwrite {output_dir}; use another --label")
+    require_jl()
+    machine_id = provision_machine(args, root)
+    leave_running = False
+    try:
+        remote_root = sync_eval_code(machine_id, root, args)
+        payload = jl_json(
+            ["run", "--on", machine_id, "--no-follow", "--yes", "--",
+             "bash", "-lc", remote_eval_shell(remote_root, args)]
+        )
+        if not isinstance(payload, dict) or not payload.get("run_id"):
+            raise RuntimeError(f"jl run did not return a run_id: {payload!r}")
+        run_id = str(payload["run_id"])
+        save_session(root, run_id=run_id, benchmark_config=args.config)
+        print(f"run {run_id}")
+        detached = follow_run(run_id)
+        state = run_state(run_id)
+        if detached and state not in {"succeeded", "failed"}:
+            leave_running = True
+            print(f"detached; benchmark still running on {machine_id} as {run_id}")
+            return 0
+        if state != "succeeded":
+            raise RuntimeError(f"benchmark run {run_id} finished with state {state or 'unknown'}")
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+        jl([
+            "download", machine_id,
+            f"{remote_root}/{args.results_dir}/{args.label}",
+            str(output_dir.parent), "-r",
+        ])
+        summary = output_dir / "evaluation.summary.json"
+        if not summary.is_file():
+            raise RuntimeError(f"benchmark download incomplete: {summary}")
+        manifest = {
+            "checkpoint": args.checkpoint,
+            "revision": args.revision,
+            "config": args.config,
+            "temperature": args.temperature,
+            "max_new_tokens": args.max_new_tokens,
+            "mode": args.mode,
+            "limit": args.limit,
+            "run_id": run_id,
+            "completed_at": datetime.now(UTC).isoformat(),
+        }
+        (output_dir / "run.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        print(summary.read_text(encoding="utf-8"))
+        print(f"benchmark results: {output_dir}")
+    finally:
+        if not args.keep and not leave_running:
+            stop_instance(machine_id, destroy=False)
+            print(f"instance {machine_id} paused")
+    return 0
+
+
 def provision_machine(args: argparse.Namespace, root: Path) -> str:
     machine_id = ensure_running(args.machine_id) if args.machine_id else create_instance(args)
     print(f"instance {machine_id}")
@@ -656,6 +833,26 @@ def sync_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
         if (value := os.environ.get(key))
     }
     env_values.setdefault("WANDB_PROJECT", training.get("wandb_project", "tunelm"))
+    if env_values:
+        upload_env_file(machine_id, remote_root, ".remote.env", env_values)
+    if not args.skip_setup:
+        setup_remote(machine_id, remote_root, args.config)
+    return remote_root
+
+
+def sync_eval_code(machine_id: str, root: Path, args: argparse.Namespace) -> str:
+    home = remote_home(machine_id)
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = Path(tmp) / REMOTE_DIRNAME
+        stage_eval_payload(root, staging, args.config)
+        jl(["upload", machine_id, str(staging), home])
+    remote_root = f"{home}/{REMOTE_DIRNAME}"
+    save_session(root, machine_id=machine_id, remote_root=remote_root)
+    env_values = {
+        key: value
+        for key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+        if (value := os.environ.get(key))
+    }
     if env_values:
         upload_env_file(machine_id, remote_root, ".remote.env", env_values)
     if not args.skip_setup:
@@ -720,7 +917,12 @@ def cmd_publish(args: argparse.Namespace) -> int:
     try:
         remote_root = sync_publish_code(machine_id, root, targets, args)
         for target in targets:
-            shell = remote_publish_shell(remote_root, target, repo_id=args.repo_id)
+            shell = remote_publish_shell(
+                remote_root,
+                target,
+                repo_id=args.repo_id,
+                public=args.public,
+            )
             completed = jl(
                 ["exec", machine_id, "--", "bash", "-lc", shell],
                 capture=True,
@@ -790,7 +992,7 @@ def _add_on_flag(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train TuneLM on a JarvisLabs GPU or CPU instance")
+    parser = argparse.ArgumentParser(description="Train or benchmark TuneLM on JarvisLabs")
     commands = parser.add_subparsers(dest="command", required=True)
 
     run = commands.add_parser("run", help="create or reuse an instance and run one training config")
@@ -817,6 +1019,27 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--keep", action="store_true")
     run.add_argument("--destroy", action="store_true")
     run.add_argument("--skip-setup", action="store_true")
+
+    benchmark = commands.add_parser(
+        "benchmark", help="evaluate a Hugging Face model on a JarvisLabs GPU"
+    )
+    _add_on_flag(benchmark)
+    benchmark.add_argument("--checkpoint", required=True, help="merged Hugging Face model repo ID")
+    benchmark.add_argument("--revision", help="Hugging Face branch, tag, or commit")
+    benchmark.add_argument("--label", required=True, help="unique local result directory name")
+    benchmark.add_argument("--config", default="configs/eval/default.yaml")
+    benchmark.add_argument("--results-dir", default="results/benchmarks")
+    benchmark.add_argument("--temperature", type=float, default=0.0)
+    benchmark.add_argument("--max-new-tokens", type=int, default=3072)
+    benchmark.add_argument("--mode", choices=("combined", "code-first"), default="combined")
+    benchmark.add_argument("--limit", type=int, help="smoke-test only this many tasks")
+    benchmark.add_argument("--gpu", default="A100-80GB")
+    benchmark.add_argument("--storage", type=int, default=100)
+    benchmark.add_argument("--name", default="tunelm-benchmark")
+    benchmark.add_argument("--region")
+    benchmark.add_argument("--keep", action="store_true", help="leave GPU running after evaluation")
+    benchmark.add_argument("--skip-setup", action="store_true")
+    benchmark.add_argument("--overwrite", action="store_true")
 
     fetch = commands.add_parser("fetch", help="download remote checkpoints/results")
     _add_on_flag(fetch)
@@ -853,6 +1076,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--tag", choices=("best", "final"), help="checkpoint tag for --scope single")
     publish.add_argument("--eval-loss", type=float, help="eval loss recorded on the model card")
     publish.add_argument("--repo-id", help="override HF repo id (single publish only)")
+    publish.add_argument("--public", action="store_true", help="make uploaded repos public")
     publish.add_argument("--gpu", default="A100-80GB")
     publish.add_argument("--storage", type=int, default=100)
     publish.add_argument("--name", default="tunelm-publish")
@@ -873,6 +1097,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = {
         "self-check": cmd_self_check,
         "run": cmd_run,
+        "benchmark": cmd_benchmark,
         "fetch": cmd_fetch,
         "down": cmd_down,
         "status": cmd_status,
@@ -880,7 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     try:
         return commands[args.command](args)
-    except (FileNotFoundError, RuntimeError, json.JSONDecodeError, ValueError) as error:
+    except (OSError, RuntimeError, json.JSONDecodeError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
 

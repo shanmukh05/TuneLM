@@ -82,7 +82,6 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 npm install
-pytest
 ```
 
 Install extras when needed:
@@ -165,7 +164,6 @@ configs/          per-model training YAML and data/eval configs
 datasets/         generated JSONL (smoke fixtures are committed)
 src/tunelm/       schemas, Strudel executor, rewards, SFT/RL/train
 scripts/          generate.py, train.py, validate_data.py, infer.py
-tests/            verifier contract (parse, execute, reward)
 ```
 
 ## Security

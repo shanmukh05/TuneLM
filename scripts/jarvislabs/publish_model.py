@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge a LoRA adapter on GPU and publish the full model to a private Hugging Face repo."""
+"""Merge a LoRA adapter on GPU and publish the full model to Hugging Face."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -55,18 +56,20 @@ def _model_card(
     step: int | None,
     eval_loss: float | None,
     run_name: str | None,
+    license_id: str = "other",
 ) -> str:
     lines = [
         "---",
         f"base_model: {base_model}",
         "library_name: transformers",
         "pipeline_tag: text-generation",
-        "license: other",
+        f"license: {license_id}",
         "---",
         "",
         f"# {repo_id}",
         "",
-        "Merged TuneLM checkpoint published from a JarvisLabs GPU job.",
+        f"TuneLM merged checkpoint derived from `{base_model}`.",
+        "The weights were modified by fine-tuning for Strudel generation.",
         "",
     ]
     if run_name:
@@ -83,8 +86,26 @@ def _model_card(
         commit = metadata.get("git_commit")
         if commit:
             lines.append(f"- Git commit: `{commit}`")
-    lines.extend(["", "Do not redistribute Gemma weights outside your licensed use."])
+    lines.extend(["", "See LICENSE and NOTICE for the base-model license and modification notice."])
     return "\n".join(lines) + "\n"
+
+
+def _write_license_and_notice(dest: Path, *, base_model: str, license_id: str) -> None:
+    if license_id != "apache-2.0":
+        raise RuntimeError(f"public distribution is not configured for base license {license_id!r}")
+    with urllib.request.urlopen("https://www.apache.org/licenses/LICENSE-2.0.txt", timeout=30) as response:
+        (dest / "LICENSE").write_bytes(response.read())
+    (dest / "NOTICE").write_text(
+        "Gemma 4 is developed by Google DeepMind.\n"
+        f"This TuneLM artifact modifies {base_model} through fine-tuning "
+        "for Strudel music-code generation.\n",
+        encoding="utf-8",
+    )
+
+
+def _verify_public(api: HfApi, repo_id: str) -> None:
+    if api.model_info(repo_id).private:
+        raise RuntimeError(f"{repo_id} remains private; make it public before treating publish as complete")
 
 
 def default_repo_id(
@@ -127,6 +148,11 @@ def merge_and_publish(
         step=step,
         tag=tag,
     )
+    api = HfApi(token=token)
+    base_info = api.model_info(base_model)
+    license_id = str(getattr(base_info.card_data, "license", None) or "other")
+    if not private and license_id != "apache-2.0":
+        raise RuntimeError(f"public distribution is not configured for base license {license_id!r}")
 
     temp_root = Path(tempfile.mkdtemp(prefix="tunelm-publish-"))
     base_dir = temp_root / "base"
@@ -159,9 +185,12 @@ def merge_and_publish(
                 step=step,
                 eval_loss=eval_loss,
                 run_name=run_name,
+                license_id=license_id,
             ),
             encoding="utf-8",
         )
+        if license_id == "apache-2.0":
+            _write_license_and_notice(merged_dir, base_model=base_model, license_id=license_id)
 
         create_repo(repo_id, private=private, exist_ok=True, token=token)
         upload_folder(
@@ -170,6 +199,8 @@ def merge_and_publish(
             token=token,
             commit_message=f"Publish merged TuneLM checkpoint ({tag or 'merged'})",
         )
+        if not private:
+            _verify_public(api, repo_id)
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
 

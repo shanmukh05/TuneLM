@@ -11,6 +11,8 @@ def main() -> None:
     parser.add_argument("prompt")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--compile-retries", type=int, default=2)
+    parser.add_argument("--mode", choices=["combined", "code-first"], default="combined")
     parser.add_argument("--no-validate", action="store_true")
     args = parser.parse_args()
     print(
@@ -20,6 +22,8 @@ def main() -> None:
                 args.checkpoint,
                 temperature=args.temperature,
                 validate=not args.no_validate,
+                compile_retries=args.compile_retries,
+                mode=args.mode,
             )
         )
     )

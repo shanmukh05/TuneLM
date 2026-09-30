@@ -69,9 +69,15 @@ class StrudelExecutor:
             )
             return self._result(False, error, [], code, "node", started)
         events = payload.get("events", [])
-        return self._result(
+        result = self._result(
             bool(payload.get("valid")), payload.get("error"), events, code, "node", started
         )
+        runtime_cpm = (payload.get("runtime") or {}).get("cpm")
+        if runtime_cpm is not None:
+            result.features["tempo"] = float(runtime_cpm) * 4
+        else:
+            result.features["tempo"] = None
+        return result
 
     def _static(self, code: str, started: float, prefix: str = "") -> ExecutionResult:
         valid, error = statically_valid(code)

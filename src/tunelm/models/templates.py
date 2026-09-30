@@ -128,6 +128,13 @@ musical quality → compactness (edit/repair only; never shorten compose form to
 Do not use network access, samples(), dynamic import(), fetch, eval, browser APIs, or
 other external side effects."""
 
+CODE_ONLY_SYSTEM_PROMPT = """You write executable Strudel JavaScript for music requests.
+Return only the complete Strudel program, with no JSON or Markdown.
+Use setcpm(BPM/4), named const layers, and a final pattern expression.
+For a full composition, make at least 15-20 seconds of evolving material before it repeats.
+For edits, preserve unrelated code and change only the requested part.
+For repairs, keep the original musical idea. Do not use network or external side effects."""
+
 
 def task_user_prompt(task: RLTask) -> str:
     parts = [task.prompt]
