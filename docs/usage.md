@@ -387,7 +387,10 @@ Outputs are in `results/benchmarks/LABEL/` by default, or under
 `--results-dir/LABEL/`: `predictions.jsonl`,
 `evaluation.jsonl`, `evaluation.summary.json`, `evaluation.review.csv`, and
 `run.json` (repo, revision, decoding settings, run ID). `--config` selects a
-different evaluation YAML, `--keep` leaves the GPU running, and `--overwrite`
+different evaluation YAML. `--detach` returns the run ID while leaving the GPU
+running; unlike an attached run, it does not download results or pause the
+instance automatically. `--keep` leaves the GPU running after an attached run,
+and `--overwrite`
 explicitly permits reusing a local result label. Do not use `--skip-setup` on a
 new machine. A paused instance may still incur storage charges; use `down
 --destroy` after its artifacts have been downloaded.

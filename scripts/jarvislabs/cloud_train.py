@@ -129,6 +129,7 @@ def stage_eval_payload(root: Path, dest: Path, config_path: str) -> None:
     for name in ("src", "configs", "scripts"):
         shutil.copytree(root / name, dest / name, ignore=_ignore)
     config = load_config(root / config_path)
+    _copy_into_payload(root, dest, config_path)
     _copy_into_payload(root, dest, config["tasks"])
     for name in ("pyproject.toml", "package.json", "package-lock.json", "README.md"):
         source = root / name
@@ -762,6 +763,10 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         run_id = str(payload["run_id"])
         save_session(root, run_id=run_id, benchmark_config=args.config)
         print(f"run {run_id}")
+        if args.detach:
+            leave_running = True
+            print(f"detached; follow with: jl run logs {run_id} --tail 50")
+            return 0
         detached = follow_run(run_id)
         state = run_state(run_id)
         if detached and state not in {"succeeded", "failed"}:
@@ -1038,6 +1043,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--name", default="tunelm-benchmark")
     benchmark.add_argument("--region")
     benchmark.add_argument("--keep", action="store_true", help="leave GPU running after evaluation")
+    benchmark.add_argument("--detach", action="store_true", help="return while evaluation runs")
     benchmark.add_argument("--skip-setup", action="store_true")
     benchmark.add_argument("--overwrite", action="store_true")
 
