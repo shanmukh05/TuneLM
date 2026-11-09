@@ -1,0 +1,7 @@
+schema_version: 2
+name: LiquidAI/LFM3-1.7B-Base
+revision: 7bca5038823c0d0f14efe06439109354a10e014c
+dtype: bfloat16
+max_length: 4096
+trust_remote_code: true
+attention: sdpa

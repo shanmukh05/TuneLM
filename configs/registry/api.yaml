@@ -1,0 +1,64 @@
+schema_version: 2
+version: strudel-1.2.6-curated-1
+source: https://strudel.cc/learn/
+methods:
+  setcpm:
+    signature: 'setcpm(BPM/4): 4 beats per cycle'
+    category: tempo
+  s:
+    signature: 's(pattern).bank(''RolandTR909''): validated drum tokens bd sd hh cp'
+    category: sound
+  n:
+    signature: n(degrees).scale('C3:minor').s('sawtooth')
+    category: pitch
+  scale:
+    signature: '.scale(''C3:minor''): include register; scale degrees from n()'
+    category: pitch
+  note:
+    signature: 'note(''c3 e3 g3'').s(''triangle''): absolute note names'
+    category: pitch
+  stack:
+    signature: 'stack(voice1, voice2, ...): parallel voices'
+    category: arrangement
+  arrange:
+    signature: 'arrange([4, intro], [8, main], [4, outro]): cycle durations'
+    category: arrangement
+  slow:
+    signature: '.slow(factor): stretch cycle duration'
+    category: rhythm
+  fast:
+    signature: '.fast(factor): compress cycle duration'
+    category: rhythm
+  euclid:
+    signature: '.euclid(pulses, steps): distribute pulses evenly'
+    category: rhythm
+  jux:
+    signature: '.jux(rev): stereo juxtaposition'
+    category: stereo
+  'off':
+    signature: '.off(1/8, x => x.add(7)): shifted superposition'
+    category: rhythm
+  lpf:
+    signature: '.lpf(cutoff_hz): e.g. sine.range(200,2400).slow(8)'
+    category: filter
+  hpf:
+    signature: '.hpf(cutoff_hz): e.g. 200 for pads above bass'
+    category: filter
+  lpq:
+    signature: '.lpq(resonance): conservative Q, e.g. 2'
+    category: filter
+  gain:
+    signature: '.gain(level): start below 1 per voice; symbolic value is not loudness'
+    category: mix
+  pan:
+    signature: '.pan(sine.slow(4)): stereo position 0..1'
+    category: stereo
+  room:
+    signature: '.room(amount): reverb send'
+    category: space
+  decay:
+    signature: '.decay(seconds): e.g. 0.2'
+    category: envelope
+  sustain:
+    signature: '.sustain(level): e.g. 0 for plucked bass'
+    category: envelope

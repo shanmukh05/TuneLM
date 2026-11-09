@@ -1,8 +1,0 @@
-extends: sft.yaml
-output: datasets/sft/next_train.jsonl
-samples_file: datasets/sft/next_samples.jsonl
-prompts_file: datasets/sft/next_prompts.jsonl
-stage: prompts
-append: false
-batch:
-  enabled: true

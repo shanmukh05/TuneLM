@@ -1,151 +1,190 @@
-"""Load TuneLM checkpoints and generate validated Strudel responses."""
+"""Generate and evaluate predictions with the same retrieval and response contract.
+
+Model weights are loaded only for explicit inference; scoring accepts saved JSONL.
+"""
 
 from __future__ import annotations
 
-import json
+import time
 from pathlib import Path
-from typing import Any
 
-import torch
-from peft import AutoPeftModelForCausalLM
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-from tunelm.inference_limits import DEFAULT_MAX_NEW_TOKENS
-from tunelm.models.templates import CODE_ONLY_SYSTEM_PROMPT, SYSTEM_PROMPT, render_generation_prompt
-from tunelm.schemas import ModelResponse
-from tunelm.strudel.controls import infer_controls_from_code
-from tunelm.strudel.executor import StrudelExecutor
-from tunelm.strudel.parser import ResponseParseError, parse_model_response
-
-
-def response_from_code_completion(completion: str) -> ModelResponse:
-    try:
-        return parse_model_response(completion)
-    except ResponseParseError:
-        pass
-    code = completion.strip()
-    if code.startswith("```"):
-        lines = code.splitlines()
-        if len(lines) >= 3 and lines[-1].strip() == "```":
-            code = "\n".join(lines[1:-1]).strip()
-    controls = infer_controls_from_code(code)
-    instruments = sorted({sound for layer in controls.layers for sound in layer.sounds})
-    return ModelResponse.model_validate(
-        {
-            "plan": {
-                "tempo": controls.bpm,
-                "instruments": instruments or ["pattern"],
-                "structure": "Generated Strudel arrangement",
-            },
-            "controls": controls.model_dump(),
-            "strudel_code": code,
-        }
-    )
+from tunelm.io import (
+    append_jsonl,
+    content_hash,
+    project_path,
+    read_json,
+    read_jsonl,
+    recover_journal,
+    write_json,
+    write_jsonl,
+)
+from tunelm.memory import Memory
+from tunelm.planner import make_plan, pack_context
+from tunelm.responses import render_prompt, restore_thinking
+from tunelm.rewards import score
+from tunelm.schemas import Plan, Task
+from tunelm.training import ModelSpec, _base_model, _file_hash, load_tokenizer
 
 
-def load_checkpoint(checkpoint: str, *, revision: str | None = None):
-    tokenizer = AutoTokenizer.from_pretrained(
-        checkpoint, revision=revision, trust_remote_code=False, padding_side="left"
-    )
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    if (Path(checkpoint) / "adapter_config.json").exists():
-        model = AutoPeftModelForCausalLM.from_pretrained(
-            checkpoint, revision=revision, device_map="auto", dtype="auto", trust_remote_code=False
-        )
+def load_checkpoint(spec: ModelSpec, checkpoint: str | None = None):
+    """Reload base or PEFT checkpoints, including the GRPO adapter's merged SFT base."""
+    tokenizer = load_tokenizer(spec)
+    if checkpoint:
+        from peft import PeftConfig, PeftModel
+
+        path = project_path(checkpoint)
+        adapter = PeftConfig.from_pretrained(str(path))
+        base = adapter.base_model_name_or_path
+        if Path(base).is_absolute() and not Path(base).exists():
+            manifest = read_json(path / "run.json")
+            base = str(project_path(manifest["config"]["merged_sft"]))
+        if not project_path(base).exists() and base != spec.name:
+            raise ValueError("Adapter base is missing or belongs to another model")
+        model = PeftModel.from_pretrained(_base_model(spec, base), str(path))
     else:
-        model = AutoModelForCausalLM.from_pretrained(
-            checkpoint, revision=revision, device_map="auto", dtype="auto", trust_remote_code=False
-        )
-    model.eval()
+        model = _base_model(spec)
+    import torch
+
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else ("mps" if torch.backends.mps.is_available() else "cpu")
+    )
+    if device == "cpu":
+        model = model.float()
+    model.to(device).eval()
     return model, tokenizer
 
 
-def _input_device(model):
-    """Return the embedding device, including for Accelerate-dispatched models."""
-    return model.get_input_embeddings().weight.device
+def make_task(
+    prompt: str,
+    memory: Memory,
+    tokenizer,
+    *,
+    plan: Plan | None = None,
+    budget: int = 550,
+    split: str = "benchmark",
+) -> Task:
+    plan = plan or make_plan(prompt)
+    retrieved = memory.retrieve(plan)
+    packed = pack_context(plan, retrieved, tokenizer, budget)
+    return Task(
+        id=content_hash([prompt, plan.model_dump(), memory.version])[:24],
+        prompt=prompt,
+        plan=plan,
+        context=packed["context"],
+        source_families=[],
+        split=split,
+        memory_version=memory.version,
+        retrieved_ids=[m["stem"]["id"] for m in retrieved["matches"]],
+    )
 
 
-def generate_messages(
-    messages: list[dict[str, str]],
+def predict(
+    task: Task,
     model,
     tokenizer,
     *,
-    max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
-    temperature: float = 0.7,
-) -> str:
-    text = render_generation_prompt(messages, tokenizer)
-    inputs = tokenizer(text, return_tensors="pt").to(_input_device(model))
-    generation = {
+    max_new_tokens: int = 1536,
+    temperature: float = 0.0,
+    max_length: int = 4096,
+) -> dict:
+    import torch
+
+    prompt = render_prompt(task, tokenizer)
+    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
+    size = inputs["input_ids"].shape[1]
+    if size + max_new_tokens > max_length:
+        raise ValueError(
+            "Prompt plus completion exceeds configured context; reduce input or output"
+        )
+    kwargs = {
         "max_new_tokens": max_new_tokens,
         "do_sample": temperature > 0,
+        "pad_token_id": tokenizer.pad_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
     }
     if temperature > 0:
-        generation["temperature"] = temperature
+        kwargs["temperature"] = temperature
     with torch.inference_mode():
-        ids = model.generate(**inputs, **generation)
-    return tokenizer.decode(ids[0, inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+        tokens = model.generate(**inputs, **kwargs)
+    text = tokenizer.decode(tokens[0, size:], skip_special_tokens=False)
+    text = text.split(tokenizer.eos_token)[0].rstrip()
+    text = restore_thinking(text)
+    scored = score(text, task.plan)
+    return {"schema_version": 2, "id": task.id, "completion": text, **scored}
 
 
-def generate(
-    prompt: str,
-    checkpoint: str,
-    *,
-    max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
-    temperature: float = 0.7,
-    validate: bool = True,
-    compile_retries: int = 2,
-    mode: str = "combined",
-) -> dict[str, Any]:
-    model, tokenizer = load_checkpoint(checkpoint)
-    if mode not in {"combined", "code-first"}:
-        raise ValueError(f"Unknown generation mode: {mode}")
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT if mode == "combined" else CODE_ONLY_SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
-    executor = StrudelExecutor(backend="node", cycles=8, max_events=8192)
-    last_error = "no completion"
-    for attempt in range(compile_retries + 1):
-        completion = generate_messages(
-            messages,
-            model,
-            tokenizer,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature if attempt == 0 else min(temperature, 0.2),
-        )
-        try:
-            response = (
-                parse_model_response(completion)
-                if mode == "combined"
-                else response_from_code_completion(completion)
-            )
-        except (ResponseParseError, ValueError) as exc:
-            last_error = str(exc)
-            response = None
-        else:
-            execution = executor.run(response.strudel_code) if validate else None
-            if execution is None or execution.playable:
-                output = response.model_dump()
-                if execution is not None:
-                    output["validation"] = execution.model_dump()
-                output["generation_attempts"] = attempt + 1
-                return output
-            last_error = execution.error or "program produced no audible events"
-        messages = [
-            messages[0],
-            messages[1],
-            {"role": "assistant", "content": completion},
+def evaluate(tasks_file: str, predictions_file: str, directory: str) -> dict:
+    """Score saved predictions and report missing/extra IDs instead of hiding them."""
+    tasks = [Task.model_validate(r) for r in read_jsonl(tasks_file)]
+    predictions = read_jsonl(predictions_file)
+    ids = [r["id"] for r in predictions]
+    if len(set(ids)) != len(ids) or len({t.id for t in tasks}) != len(tasks):
+        raise ValueError("Duplicate task or prediction IDs")
+    lookup = {r["id"]: r for r in predictions}
+    records = []
+    for task in tasks:
+        prediction = lookup.get(task.id)
+        scored = score(prediction["completion"] if prediction else "", task.plan)
+        records.append(
             {
-                "role": "user",
-                "content": (
-                    f"The previous response failed Strudel validation: {last_error[:600]}. "
-                    "Return the full corrected response in the requested format. Preserve the original request."
-                ),
-            },
-        ]
-    raise RuntimeError(f"Strudel generation failed after {compile_retries + 1} attempts: {last_error}")
+                "schema_version": 2,
+                "id": task.id,
+                "category": task.plan.category,
+                "retrieval_regime": task.retrieval_regime,
+                "missing_prediction": prediction is None,
+                **scored,
+            }
+        )
+    if not records:
+        raise ValueError("Benchmark has no tasks")
+    metrics = {
+        "schema_version": 2,
+        "tasks": len(tasks),
+        "missing": sum(r["missing_prediction"] for r in records),
+        "extra_prediction_ids": sorted(set(lookup) - {t.id for t in tasks}),
+        "execution_rate": sum(r["valid"] for r in records) / len(records),
+        "mean_reward": sum(r["total"] for r in records) / len(records),
+        "listening_review": "pending",
+    }
+    write_jsonl(Path(directory) / "scores.jsonl", records)
+    write_json(Path(directory) / "summary.json", metrics)
+    return metrics
 
 
-def dumps(value: dict[str, Any]) -> str:
-    return json.dumps(value, indent=2, ensure_ascii=False)
+def predict_bank(tasks_file: str, output: str, spec: ModelSpec, checkpoint: str | None) -> dict:
+    """Generate a frozen task bank without rerunning retrieval or changing contexts."""
+    tasks = [Task.model_validate(r) for r in read_jsonl(tasks_file)]
+    manifest_path = output + ".manifest.json"
+    identity = content_hash(
+        {
+            "tasks": [t.model_dump() for t in tasks],
+            "model": spec.model_dump(),
+            "checkpoint": checkpoint,
+            "adapter_hash": _file_hash(project_path(checkpoint) / "adapter_model.safetensors")
+            if checkpoint
+            else None,
+        }
+    )
+    if project_path(manifest_path).exists():
+        if read_json(manifest_path)["identity"] != identity:
+            raise ValueError("Predictions belong to another model/task bank; choose a fresh output")
+    elif project_path(output).exists():
+        raise ValueError("Existing prediction file has no provenance manifest")
+    write_json(
+        manifest_path,
+        {
+            "schema_version": 2,
+            "identity": identity,
+            "model": spec.model_dump(),
+            "checkpoint": checkpoint,
+        },
+    )
+    known = {r["id"] for r in recover_journal(output)}
+    model, tokenizer = load_checkpoint(spec, checkpoint)
+    started = time.monotonic()
+    for task in tasks:
+        if task.id not in known:
+            append_jsonl(output, predict(task, model, tokenizer, max_length=spec.max_length))
+    return {"predictions": output, "seconds": round(time.monotonic() - started, 2)}

@@ -1,178 +1,246 @@
-"""Unified CLI for dataset generation and training/evaluation.
+"""Explicit CLI for corpus preparation, inference, and required SFT/GRPO stages.
 
-`scripts/generate.py` and `scripts/train.py` delegate here. Routing is inferred
-from the loaded YAML so callers only pass `--config`.
+Commands that contact a teacher or load model weights are deliberately separate.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 
-from tunelm.config import load_config, project_path
-from tunelm.training_preflight import (
-    dry_run_training,
-    infer_pipeline,
-    require_training_runtime,
-    validate_training_config,
-)
+from tunelm.io import load_config, load_env_file, write_json
 
 
-def infer_generate_kind(config: dict) -> str:
-    if config.get("providers") or config.get("models"):
-        return "sft"
-    return "rl"
-
-
-def infer_train_kind(config: dict) -> str:
-    if "tasks" in config and "predictions" in config:
-        return "evaluate"
-    return infer_pipeline(config)
-
-
-def run_generate(config_path: str) -> None:
-    config = load_config(config_path)
-    kind = infer_generate_kind(config)
-    if kind == "sft":
-        from tunelm.sft_data.dataset import generate_dataset
-
-        counts = generate_dataset(config)
-        print(" ".join(f"{key}={value}" for key, value in counts.items()))
-        return
-    from tunelm.rl_data.dataset import generate_task_bank
-
-    counts = generate_task_bank(config)
-    print(" ".join(f"{key}={value}" for key, value in counts.items()))
-
-
-def run_train(
-    config_path: str,
-    *,
-    dry_run: bool = False,
-    checkpoint: str | None = None,
-    revision: str | None = None,
-    limit: int | None = None,
-    predictions: str | None = None,
-    output: str | None = None,
-    tasks: str | None = None,
-    temperature: float | None = None,
-    max_new_tokens: int | None = None,
-    mode: str | None = None,
-) -> None:
-    if dry_run and checkpoint:
-        raise ValueError("--dry-run cannot be combined with --checkpoint")
-
-    config = load_config(config_path)
-    if predictions:
-        config["predictions"] = predictions
-    if output:
-        config["output"] = output
-    if tasks:
-        config["tasks"] = tasks
-    if temperature is not None:
-        config.setdefault("generation", {})["temperature"] = temperature
-    if max_new_tokens is not None:
-        config.setdefault("generation", {})["max_new_tokens"] = max_new_tokens
-    if mode is not None:
-        config.setdefault("generation", {})["mode"] = mode
-    kind = infer_train_kind(config)
-
-    if dry_run:
-        if kind == "evaluate":
-            tasks = project_path(config["tasks"])
-            if not tasks.is_file():
-                raise FileNotFoundError(f"evaluation task file not found: {tasks}")
-            predictions = project_path(config["predictions"])
-            line = (
-                f"dry-run ok: evaluate tasks={config['tasks']} "
-                f"predictions={config['predictions']} "
-                f"output={config.get('output', 'results/evaluation.jsonl')}"
-            )
-            if not predictions.is_file():
-                print(f"{line} (predictions missing; pass --checkpoint to generate)")
-            else:
-                print(line)
-            return
-        report = dry_run_training(config_path)
-        print(
-            f"dry-run ok: {report['pipeline']} model={report['model']} "
-            f"dataset={report['dataset']} output={report['output_dir']}"
-        )
-        for warning in report.get("warnings", []):
-            print(f"warning: {warning}")
-        return
-    if kind == "evaluate":
-        if checkpoint:
-            from tunelm.eval.predictor import generate_predictions
-
-            count = generate_predictions(
-                project_path(config["tasks"]),
-                project_path(config["predictions"]),
-                checkpoint,
-                temperature=float(config.get("generation", {}).get("temperature", 0.0)),
-                max_new_tokens=int(config.get("generation", {}).get("max_new_tokens", 1536)),
-                limit=limit,
-                mode=config.get("generation", {}).get("mode", "combined"),
-                revision=revision,
-            )
-            print(f"generated {count} predictions")
-        from tunelm.eval.evaluator import evaluate_predictions
-
-        print(json.dumps(evaluate_predictions(config), indent=2))
-        return
-
-    validate_training_config(
-        config,
-        config_path=config_path,
-        strict_datasets=True,
-        strict_adapter=True,
+def parser() -> argparse.ArgumentParser:
+    cli = argparse.ArgumentParser(prog="tunelm", description="Grounded Strudel music pipelines")
+    commands = cli.add_subparsers(dest="command", required=True)
+    for name in ["verify", "decompose"]:
+        p = commands.add_parser(name)
+        p.add_argument("file")
+        p.add_argument("--cycles", type=int, default=32)
+        p.add_argument("--timeout", type=float, default=5)
+        p.add_argument("--output")
+    p = commands.add_parser("ingest")
+    p.add_argument("sources")
+    p.add_argument("--cycles", type=int, default=32)
+    p = commands.add_parser("build-memory")
+    p.add_argument("--stems", default="datasets/stems/verified.jsonl")
+    p.add_argument("--config", default="configs/memory.yaml")
+    p.add_argument("--output", default="datasets/memory")
+    p.add_argument(
+        "--lexical", action="store_true", help="Explicit offline baseline, not semantic embeddings"
     )
-    require_training_runtime(config)
-    if kind == "grpo":
-        from tunelm.rl.trainer import train_rl
-
-        train_rl(config)
-        return
-    from tunelm.sft.trainer import train_sft
-
-    train_sft(config)
-
-
-def generate_main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Generate TuneLM RL tasks or SFT data")
-    parser.add_argument("--config", required=True)
-    args = parser.parse_args(argv)
-    run_generate(args.config)
-
-
-def train_main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Train or evaluate TuneLM checkpoints")
-    parser.add_argument("--config", required=True)
-    parser.add_argument(
+    p = commands.add_parser("plan")
+    _prompt_arguments(p)
+    p.add_argument("--output", default="results/plans/latest.json")
+    p = commands.add_parser("generate")
+    p.add_argument("--config", default="configs/generation.yaml")
+    p.add_argument(
+        "--env-file", default=".env.local", help="Literal KEY=value file; shell env wins"
+    )
+    p.add_argument("--model-config", default="configs/model.yaml")
+    p.add_argument("--provider", choices=["openai", "gemini", "anthropic", "claude"])
+    p.add_argument("--teacher-model")
+    p.add_argument("--run-id")
+    p.add_argument("--dataset-dir")
+    p.add_argument("--count", type=int)
+    p.add_argument(
         "--dry-run",
         action="store_true",
-        help="validate config and dataset paths without loading model weights",
+        help="Preview model quotas without API calls or state writes",
     )
-    parser.add_argument("--checkpoint", help="evaluate: generate predictions before scoring")
-    parser.add_argument("--revision", help="evaluate: Hugging Face branch, tag, or commit")
-    parser.add_argument("--limit", type=int, help="evaluate: only generate this many predictions")
-    parser.add_argument("--predictions", help="evaluate: score an existing predictions JSONL")
-    parser.add_argument("--output", help="evaluate: write results and review CSV here")
-    parser.add_argument("--tasks", help="evaluate: score against this task JSONL")
-    parser.add_argument("--temperature", type=float, help="evaluate: generation temperature")
-    parser.add_argument("--max-new-tokens", type=int, help="evaluate: completion token limit")
-    parser.add_argument("--mode", choices=["combined", "code-first"], help="evaluate: inference mode")
-    args = parser.parse_args(argv)
-    run_train(
-        args.config,
-        dry_run=args.dry_run,
-        checkpoint=args.checkpoint,
-        revision=args.revision,
-        limit=args.limit,
-        predictions=args.predictions,
-        output=args.output,
-        tasks=args.tasks,
-        temperature=args.temperature,
-        max_new_tokens=args.max_new_tokens,
-        mode=args.mode,
+    p.add_argument(
+        "--offline",
+        action="store_true",
+        help="Use a cached tokenizer; teacher calls still require network",
     )
+    for name in ["train-sft", "train-grpo"]:
+        p = commands.add_parser(name)
+        p.add_argument("--config", required=True)
+        p.add_argument("--model-config", default="configs/model.yaml")
+        p.add_argument("--dry-run", action="store_true")
+        p.add_argument(
+            "--tokenize", action="store_true", help="Also verify actual tokenizer masks and lengths"
+        )
+        p.add_argument("--offline", action="store_true")
+        p.add_argument("--resume", nargs="?", const=True)
+    p = commands.add_parser("infer")
+    _prompt_arguments(p)
+    p.add_argument("--checkpoint", required=True)
+    p.add_argument("--output", default="results/inference/latest.json")
+    p.add_argument("--max-new-tokens", type=int, default=1536)
+    p = commands.add_parser("predict")
+    p.add_argument("--tasks", default="datasets/evaluation/benchmark.jsonl")
+    p.add_argument("--checkpoint", help="Omit to generate with the pinned base model")
+    p.add_argument("--model-config", default="configs/model.yaml")
+    p.add_argument("--output", required=True)
+    p = commands.add_parser("evaluate")
+    p.add_argument("--tasks", default="datasets/evaluation/benchmark.jsonl")
+    p.add_argument("--predictions", required=True)
+    p.add_argument("--output", required=True)
+    return cli
+
+
+def _prompt_arguments(p):
+    p.add_argument("prompt")
+    p.add_argument("--plan", help="Explicit Plan YAML instead of prose-rule inference")
+    p.add_argument("--memory", default="datasets/memory")
+    p.add_argument("--model-config", default="configs/model.yaml")
+    p.add_argument("--offline", action="store_true")
+
+
+def _verify(args):
+    from tunelm.io import project_path
+    from tunelm.verifier import Verifier
+
+    result = Verifier(timeout=args.timeout).request(
+        project_path(args.file).read_text(), operation=args.command, cycles=args.cycles
+    )
+    if args.output:
+        write_json(args.output, result)
+    return {k: v for k, v in result.items() if k != "events"}
+
+
+def _memory(args):
+    from tunelm.memory import build_memory
+
+    settings = load_config(args.config)
+    if args.lexical:
+        settings = {"mode": "lexical"}
+    return build_memory(args.stems, args.output, settings)
+
+
+def _task(args):
+    from tunelm.inference import make_task
+    from tunelm.memory import Memory
+    from tunelm.schemas import Plan
+    from tunelm.training import ModelSpec, load_tokenizer
+
+    spec = ModelSpec.model_validate(load_config(args.model_config))
+    tokenizer = load_tokenizer(spec, offline=args.offline)
+    explicit = Plan.model_validate(load_config(args.plan)) if args.plan else None
+    task = make_task(args.prompt, Memory(args.memory), tokenizer, plan=explicit)
+    return task, spec, tokenizer
+
+
+def _plan(args):
+    task, _, _ = _task(args)
+    write_json(args.output, task.model_dump())
+    return {"task": args.output, "plan": task.plan.model_dump()}
+
+
+def _generate(args):
+    from tunelm.synthesis import generate, generation_preview
+    from tunelm.training import ModelSpec, load_tokenizer
+
+    load_env_file(args.env_file)
+    config = generation_config(args)
+    if args.dry_run:
+        return generation_preview(config)
+    spec = ModelSpec.model_validate(load_config(args.model_config))
+    return generate(
+        config,
+        load_tokenizer(spec, offline=args.offline),
+    )
+
+
+def generation_config(args):
+    """Apply explicit CLI selections before validating provider and output settings."""
+    from tunelm.synthesis import GenerationConfig
+
+    raw = load_config(args.config)
+    overrides = {"run_id": args.run_id, "dataset_dir": args.dataset_dir, "count": args.count}
+    raw.update({key: value for key, value in overrides.items() if value is not None})
+    if args.provider or args.teacher_model:
+        if not args.provider or not args.teacher_model:
+            raise ValueError("A single-model override requires both --provider and --teacher-model")
+        raw["models"] = [
+            {
+                "id": "cli-teacher",
+                "provider": args.provider,
+                "model": args.teacher_model,
+                "fraction": 1.0,
+            }
+        ]
+    return GenerationConfig.model_validate(raw)
+
+
+def _train(args):
+    from tunelm.training import TrainConfig, preflight, train_grpo, train_sft
+
+    raw = load_config(args.config)
+    raw.setdefault("model", load_config(args.model_config))
+    config = TrainConfig.model_validate(raw)
+    if args.command != "train-" + config.stage:
+        raise ValueError("Training stage does not match the selected command")
+    if args.resume is not None:
+        config.resume = args.resume
+    if args.dry_run:
+        return preflight(config, tokenize=args.tokenize, offline=args.offline)
+    return train_sft(config) if config.stage == "sft" else train_grpo(config)
+
+
+def _infer(args):
+    from tunelm.inference import load_checkpoint, predict
+
+    task, spec, _ = _task(args)
+    model, tokenizer = load_checkpoint(spec, args.checkpoint)
+    result = predict(
+        task, model, tokenizer, max_new_tokens=args.max_new_tokens, max_length=spec.max_length
+    )
+    write_json(args.output, {"task": task.model_dump(), "prediction": result})
+    return result
+
+
+def _predict(args):
+    from tunelm.inference import predict_bank
+    from tunelm.training import ModelSpec
+
+    return predict_bank(
+        args.tasks,
+        args.output,
+        ModelSpec.model_validate(load_config(args.model_config)),
+        args.checkpoint,
+    )
+
+
+def _evaluate(args):
+    from tunelm.inference import evaluate
+
+    return evaluate(args.tasks, args.predictions, args.output)
+
+
+def _ingest(args):
+    from tunelm.corpus import ingest
+
+    return ingest(args.sources, cycles=args.cycles)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parser().parse_args(argv)
+    handlers = {
+        "verify": _verify,
+        "decompose": _verify,
+        "ingest": _ingest,
+        "build-memory": _memory,
+        "plan": _plan,
+        "generate": _generate,
+        "train-sft": _train,
+        "train-grpo": _train,
+        "infer": _infer,
+        "predict": _predict,
+        "evaluate": _evaluate,
+    }
+    try:
+        result = handlers[args.command](args)
+        print(json.dumps(result, ensure_ascii=False, allow_nan=False, indent=2))
+        if result.get("valid") is False:
+            raise SystemExit(1)
+    except (ValueError, OSError, RuntimeError, ImportError) as error:
+        print(json.dumps({"error": str(error), "command": args.command}), file=sys.stderr)
+        raise SystemExit(1) from error
+
+
+if __name__ == "__main__":
+    main()

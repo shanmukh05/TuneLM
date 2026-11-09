@@ -1,0 +1,449 @@
+# Reviewed allowlist, not a web-wide scrape. Keep revisions and checksums pinned.
+# MIT, CC0, GPL and AGPL scopes are included with their individual license evidence.
+# Downloads are temporary; extracted JSONL and license notices are retained.
+schema_version: 2
+output_dir: datasets/sources
+local_sources:
+  - examples/seeds.jsonl
+cycles: 32
+repositories:
+  - repo: arnoldwender/wm-prototyp-live-music-coder
+    revision: 6dfae0e913ad63f7f3f7537d275d5c326cf7f8f2
+    license: MIT
+    notes: >-
+      Only src/data/example-library.ts, whose file header explicitly declares
+      SPDX-License-Identifier MIT and credits Arnold Wender / Wender Media.
+      LICENSE-MIT is retained. The application's root AGPL license is not
+      substituted for this file-level declaration. Only engine=strudel records
+      are extracted, including appended records; no Tone.js/Web Audio examples.
+      Authorship method is not independently established.
+    evidence:
+      - path: LICENSE-MIT
+        sha256: 46fa14df1ca3f13d8917c361776c141b6b494836889cc671f30cf3abb6f07ec3
+      - path: src/data/example-library.ts
+        sha256: 5b84be2e46f757309e42487ffdcbdbc6cf8ee5f01db7b05db7481d88b676a91b
+        retain_notice: false
+    files:
+      - path: src/data/example-library.ts
+        sha256: 5b84be2e46f757309e42487ffdcbdbc6cf8ee5f01db7b05db7481d88b676a91b
+        format: module_objects
+        expected_candidates: 130
+  - repo: thedavidweng/strudel-tui
+    revision: 9de9699b48549fe7ed71b2b1e97bad5e3adaa6c8
+    license: MIT
+    notes: >-
+      Only the six bundled patterns/*.strudel examples under the repository's
+      explicit MIT license, copyright Strudel-TUI Contributors. No user pattern
+      stores, upstream Strudel tunes, or copied documentation are imported.
+      Authorship method is not independently established.
+    evidence:
+      - path: LICENSE
+        sha256: 20496aa42eac94b75e98f62f3d7dad12a94bacaf24d89530de577a1d06bded52
+    files:
+      - path: patterns/acid.strudel
+        sha256: d447d5b390177808db3ab5b0de25325cf76ec51620002e732ade98e63e64aeab
+      - path: patterns/ambient.strudel
+        sha256: 307e65649a3ebf3dd60e721175ad5341ddcacdecb4ae18c337938fc9400a3d4f
+      - path: patterns/basic-beat.strudel
+        sha256: 2443346d97aa3d13e9b4f026481b9212301d3502afc1b98278c41caa89fd0846
+      - path: patterns/breakbeat.strudel
+        sha256: 3d2de45fca804a374e16fd60cf7810cf22511e62fb665a559d49a847f98e4049
+      - path: patterns/melody.strudel
+        sha256: 72d682de5bea3b197c6bcfa51410680c5fc0f000b36f7124e7b6bb192eab2c9f
+      - path: patterns/techno130.strudel
+        sha256: 0ea555cc99c5cbc846ac0d19bf32d1ee42d6268249fb3411fd203d9c887cc9d1
+  - repo: sueszli/strudel-recipes
+    revision: c081ac2f4c319db8f8c7e3fe4c3d29a83391524b
+    license: AGPL-3.0-only
+    notes: Selected AGPL-3.0 recipe scripts. No later-version option is inferred. The
+      copied trance.js and prose-only kick-production document are excluded; custom
+      sample loaders remain subject to the verifier and may be rejected.
+    evidence:
+    - path: LICENSE
+      sha256: 8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef
+    files:
+    - path: rumble.js
+      sha256: d58a36bfc5f6ea394c0226b2d9b9df3d9156ea5c5edcd38bddb3f3c2b20ed0aa
+      format: programs
+      expected_candidates: 1
+    - path: techno.js
+      sha256: dcf9fc59e237c1d9082b2f5cc5ebf53626d6720790670604fc65aef2f8f765c2
+      format: programs
+      expected_candidates: 1
+  - repo: sthefanygsa/STRUDEL-PATCHES
+    revision: 3690676afeb7f941e8d69e3c8c7276c0370af369
+    license: MIT
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: 58a08a329fc3c607d26c83261d3160c40cc299669ff03c16900e17b9f60972f3
+    files:
+    - path: song1.md
+      sha256: af020109505a4b5ca74253c7949aab79ffec93fe9210cbee86a2f6aec8395dfc
+      format: programs
+      expected_candidates: 1
+    - path: song2.md
+      sha256: 17b81b82290ce5e84e4e2028526143809ebc21898bd5a0807574e752e186148b
+      format: programs
+      expected_candidates: 2
+    - path: song3.md
+      sha256: b46d9ec9ee576bdc0c3405c0a006e34d54e4e420162d3749e18e86f4c5e25722
+      format: programs
+      expected_candidates: 1
+    - path: song4.md
+      sha256: 283892b33d6e6fef4174e0eb432d01dde7481e09916ea26f0f45cb1ea9fe6d3b
+      format: programs
+      expected_candidates: 1
+    - path: song5.md
+      sha256: 73ce5a271a28f72791ddde6088624aa5bd14be0042fae96d0fb28bfb6536ac9d
+      format: programs
+      expected_candidates: 1
+    - path: song6.md
+      sha256: 3098311ac56a013902a166d1e8ad35a3d77920253dae6f056d23c4bc603d2c75
+      format: programs
+      expected_candidates: 1
+  - repo: BasClason/StrudelScripts
+    revision: dea1969eba69e7f1df985750c0ff9f903d0158a5
+    license: CC0-1.0
+    notes: CC0 composition scripts. Pannekoek is excluded because it explicitly credits
+      a borrowed third-party filter. Other selected files retain repository authorship/CC0
+      provenance; audio dependencies are not downloaded.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: Melanko
+      sha256: b34a49badf1e0c938d6fcf85e32f2bf0f4fa0d371f7ab27312570f1643c4093c
+      format: programs
+      expected_candidates: 1
+    - path: wb26-01
+      sha256: 8ae8f932faaa88a69221a605519c830871f5d7f5326478ad88eb33176e95111b
+      format: programs
+      expected_candidates: 1
+    - path: wb26-02
+      sha256: 6b1d154c2cfda76557753dc22b74921ed8296846b2e0d95e12c510a3be229b74
+      format: programs
+      expected_candidates: 1
+  - repo: terefang/strudel-tunes
+    revision: 4d26d38d5af3d647e5da1342c985ebd6cf56de68
+    license: CC0-1.0
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: tune_a_structure_in_sound.md
+      sha256: 5d345fd8c441ffebffed5f56ae21bd7079373d503bbdd5887583fc6c5732724e
+      format: markdown
+      expected_candidates: 1
+    - path: tune_acidic.md
+      sha256: ccfc880c347034b2b7538d83e1e7320bcd408b56470c3890f44b1be8cb2c3d76
+      format: markdown
+      expected_candidates: 1
+    - path: tune_base_x001.md
+      sha256: d799e3f424375110cc590cf6fed132ffd70f75b43103dba81ace3ba2a7d8e43d
+      format: markdown
+      expected_candidates: 1
+    - path: tune_base_x002.md
+      sha256: b84c515b299add5d4895555734bd0d4ca223e6127562457e812a44fb4f007007
+      format: markdown
+      expected_candidates: 1
+    - path: tune_breaks_junking.md
+      sha256: 912fbb57b5ae373ae97cc80644601c7fc09f90db2cb1c2c6f7563b71705c9d6c
+      format: markdown
+      expected_candidates: 1
+    - path: tune_chord_four_stacks.md
+      sha256: ecb4f4dfd4c334ea148f57b9f8f5fc8d8d3b073ae683392393c56d2898f6935c
+      format: markdown
+      expected_candidates: 1
+    - path: tune_trance_bass_noise.md
+      sha256: 58c0c2e90744dbd72953b58add905c0a874080e5d0fb30b8690f616e248dda90
+      format: markdown
+      expected_candidates: 3
+  - repo: atraeus7/strudel_loops
+    revision: 9467c2961c06f7d0437eca7ce2e321a9f4d8bf5e
+    license: CC0-1.0
+    notes: Only the author-credited dance_loop, trihop, and vamp scripts under CC0.
+      Named external remixes, games/covers, and external coauthor pieces are excluded.
+      No sample audio is downloaded.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: dance/dance_loop.js
+      sha256: 42bb05c6b3957805e16025c524d5f6f7c374488402c10afaeb01eb54bcfa9c3e
+      format: programs
+      expected_candidates: 1
+    - path: hiphop/trihop.js
+      sha256: 0529cfc8c776c485e0ae7e89bfa5f80dc9826ce6135f96fd0dc2d8713f3cd861
+      format: programs
+      expected_candidates: 1
+    - path: techno/vamp.js
+      sha256: d8f2a3b5bf4261dcd6832dd5f31ce1216e06bf9a40307b2e21b7ae244074e99a
+      format: programs
+      expected_candidates: 1
+  - repo: JensRantil/strudel-collab
+    revision: 73f8ed9cc3fcd775157a76b41d6c1729830946ad
+    license: CC0-1.0
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: music.strudel
+      sha256: f7fd0bd82841827e1c161cd4b09ec2ad6e2debe2ce3d41d24921dd7664c3aa61
+      format: programs
+      expected_candidates: 1
+  - repo: stormouse/code-the-dj
+    revision: a6ad13f8c90d48585d7d47ba45e44c3a11da1e17
+    license: CC0-1.0
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: night1.std
+      sha256: db7dea4ac43f0a16aec5c1dccb7eb5c62e810a274ed4a670edb8b53a96fdf31c
+      format: programs
+      expected_candidates: 1
+  - repo: Aphexina/Strudel
+    revision: 7f64e6b790d1ce5ba6da170d7da95e0fd05d92c4
+    license: MIT
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a7bfdbdff7be7a5bced9414469a6e56326c6a48725e9d27a5619208adc12066a
+    files:
+    - path: strudel.js
+      sha256: 09b8833a98bac1f3d954f7df0a1a9cfdf347a63720b0d20ba22b5dc1dd12d2a7
+      format: programs
+      expected_candidates: 6
+  - repo: Raiaaa17/strudel-code-collection
+    revision: 8c05fc7e676e3397212812a03cf58aaa8d002e81
+    license: MIT
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: 2bd4191c772976bf0063bf10ac084d87d2ee80956f51590e6761862944485272
+    files:
+    - path: examples/000-first-collection.js
+      sha256: 536d0a2cf8e84e87ba07f47a80f5c1d4cf38a0179cd822aeaef70a5e5abb97b8
+      format: programs
+      expected_candidates: 1
+    - path: examples/120-techno-backbeat.js
+      sha256: 0dedad2eea9641149579b8f96895c16256ed82462dbf5fbf82143cf22491f50e
+      format: programs
+      expected_candidates: 1
+  - repo: anhussain90/strudel-compositions
+    revision: d44e6e0b43d05d71abf2323504c75d43f9798473
+    license: MIT
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: 39290687bd88aa4d93f368f518e99aac57df4f8f769f2567bb50fc9aa0b54d3e
+    files:
+    - path: drums/complex-patterns.js
+      sha256: 0d7e6b6eb3c37af7fc68c5733c84c43fa53653241476909b3c0804125ef60b45
+      format: programs
+      expected_candidates: 1
+  - repo: karmaterminal/strudel-music
+    revision: bc91d3c3025976740495db4bebac100637ed201a
+    license: MIT
+    notes: Only assets/compositions original compositions, excluding parameterized templates
+      and src/compositions audio-derived reconstructions. Repository declares MIT and
+      describes these as originals; authorship is AI-assisted/agent-oriented.
+    evidence:
+    - path: LICENSE
+      sha256: 8f18ca3efe2cca3e50f5a9efdd87c20c2e914bab9b81578abda73f76e6ba2e2a
+    files:
+    - path: assets/compositions/cael-theme.js
+      sha256: cc29a536755e5813669ef28e4e1cd488330a7fb061776581105aef81560d881d
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/cathedral-ritual.js
+      sha256: 03980ab39f8db0ed3d3c02e85f7ab3cc789b6f3dc1a61101d88e69dcc170cad1
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/combat-assault.js
+      sha256: f6466fb5d85fc6ae6698d70ebe5af78b53f7488dc149e465972e6c94514fd44c
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/dark-ambient-tension.js
+      sha256: 0413db4c7b4529c62d8bd3514d5e93e2d166bb4627f01b3d634e29b2372549dd
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/discovery-xenos.js
+      sha256: 236be2f3683b45e8fe4eea067cd701da4e500859f00e902815a4e3f7ca5d2520
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/elliott-theme.js
+      sha256: 1fc315e4e96d9aad40aeca1f2308f7d81cefb2ed51643d98f31327ca4d550c69
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/fog-and-starlight.js
+      sha256: 6364dc4f177905746be287df87eccecf549fd9165c881188ef5132bcc7ec53ef
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/lofi-chill-beats.js
+      sha256: 613605e05daecbd65402d68cad21f6717ac747846643f8ef0f572548e3ba05fd
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/machine-hum.js
+      sha256: 000cb56e34b3dc877409d37a07e268fbfd9828fddc160fdd4eb55b5fefc33181
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/rain.js
+      sha256: 29093256b19f6a697c85d54603c09ce29099a42a4e8d83f967274582dad10f4b
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/silas-theme.js
+      sha256: fc001e1c6f049344eca94e00eee43efe0553780298c496fd341174936e573d93
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/tavern-respite.js
+      sha256: 87ec5a6a1eaf176afab53d1afa0165132e3d52575ba486e7b2ab5d81c1ca6ab7
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/underhive-dread.js
+      sha256: d089baf3dd159e5de4415734c2a40231e71b4d668cf57e04200811561bee682e
+      format: programs
+      expected_candidates: 1
+    - path: assets/compositions/victory-imperium.js
+      sha256: 3ba86a40a29497a862cc6f7de6e96a4c12eeb57960210fd967c4b46c8fda375f
+      format: programs
+      expected_candidates: 1
+  - repo: abhirajdg/strudel
+    revision: 17246dbd4c001126a717f5aff4ffcc3807be9d36
+    license: CC0-1.0
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: Acid Reflex
+      sha256: 6689ddfe12c9dfbd8771140d99f2bbe3740c636e4a57d656e8f2481eb77d7836
+      format: programs
+      expected_candidates: 1
+    - path: First Steps
+      sha256: e8cdf9099cb86234cdcc796a88dae86d6502a16ec5f1bcc52603228ea30b1207
+      format: programs
+      expected_candidates: 1
+    - path: Glitched Sigils
+      sha256: 2f4c6462088cf9857ff38c7b8570c44c2a37c4b7025a83b340d9baa233031304
+      format: programs
+      expected_candidates: 1
+  - repo: cormac85/strudeling
+    revision: 89ef977f2a7e9d38c75335d2b084dc576ca5ea72
+    license: CC0-1.0
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: 1_trance_i_think.std
+      sha256: e89843276cdaa44b54b29cfa133970f5850893973ef6368f8c6d06033177df2f
+      format: programs
+      expected_candidates: 1
+  - repo: AustinOliverHaskell/strudel_code
+    revision: bc7fc80f711c39cfc8cba24ccde24d9692ce621a
+    license: CC0-1.0
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: simple_bass_line.js
+      sha256: 6783cedf4aebcd90f761555df8fe370425b43f619fdbddb1ae60872f9595e948
+      format: programs
+      expected_candidates: 1
+  - repo: neverclear86/strudel-records
+    revision: 980005dbcf34c089102aa28495f74a48fe5b0dd0
+    license: CC0-1.0
+    notes: Selected composition scripts under the repository license; retain source
+      credit, pinned URLs and the original license notice. No audio is downloaded. Authorship
+      method and listening quality are unverified.
+    evidence:
+    - path: LICENSE
+      sha256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
+    files:
+    - path: daily/2026-01-02.js
+      sha256: 212f5c637277dd82f4a7fb88836d1fd6b2a9c70a0bed70b55a152c5114fe9788
+      format: programs
+      expected_candidates: 1
+    - path: daily/2026-01-03.js
+      sha256: cacac5584ee2d3642bf9abfd987eb015c57d3136cf0842a95ca433b18cd33f94
+      format: programs
+      expected_candidates: 1
+    - path: daily/2026-01-05.js
+      sha256: 2964b29878b953dab80236e8996e65f6af2ced438b906c2f9072d95718ab9eff
+      format: programs
+      expected_candidates: 1
+  - repo: williamzujkowski/live-coding-music-mcp
+    revision: bbf19bd09991c716eb817238384b1f8e5e639f62
+    license: AGPL-3.0-or-later
+    notes: Only the four hand-written techno/trap/ambient/jazz JSON examples whose per-file
+      source.license is AGPL-3.0-or-later. SOURCES.md distinguishes these from the three
+      GPL rhythm-derived examples, which are omitted here to avoid duplicating the original
+      rhythm bank. Credits and dates remain in upstream metadata; no audio is fetched.
+    evidence:
+    - path: LICENSE
+      sha256: 0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0
+    - path: patterns/examples/SOURCES.md
+      sha256: a83460ea87ed58edb35417ae62996a8fcd0283c271c57dd94ddbdfb8f3cadb63
+    files:
+    - path: patterns/examples/techno/techno-driving.json
+      sha256: deb021242d8453c2cbcbcb6d00b3ba0a4a452522605ab3b104084b33618cb8d3
+      format: json
+    - path: patterns/examples/trap/trap-modern.json
+      sha256: 6cc2167a65ca5316bb3e94fc6280be88a7b5f39de1602511300720f111d73ac1
+      format: json
+    - path: patterns/examples/ambient/ambient-pad.json
+      sha256: 3482ca7f58a0cb670fa4c928f0f6653fed28a2ad5eee6a049bcbe8456fa06761
+      format: json
+    - path: patterns/examples/jazz/jazz-ii-v-i.json
+      sha256: 0bea4a5738a3d919409068f9ae9ea8f11f185c94e1fc594c5a18b24949a14067
+      format: json
+  - repo: uzu/strudel
+    host: codeberg
+    revision: 530e9630bfee3f1b7b770f3f243b338495934e9d
+    family: github:lvm/tidal-drum-patterns
+    license: GPL-3.0-only
+    notes: 'Only website/src/repl/drum_patterns.mjs: each of its 492 exported snippets
+      explicitly credits lvm/tidal-drum-patterns under GPL-3.0 and the urswilke/read_beats
+      converter. This file-level GPL notice is retained in every extracted code string;
+      the original GPL text is saved separately. The surrounding Strudel application
+      AGPL license is not substituted for it. No separately licensed flagship/community
+      tracks or documentation are imported. Relative rhythms are copied literally; absent
+      tempo receives the documented 30 CPM default.'
+    evidence:
+    - path: website/src/repl/drum_patterns.mjs
+      sha256: 14f057bd0b2123414b0b763fcf861947de4aaa544a3803aa7eff8b1a3ec5377e
+      retain_notice: false
+    - path: COPYING-GPL-3.0
+      url: https://raw.githubusercontent.com/lvm/tidal-drum-patterns/ed4be0f20fbc248cf7875d25a2254c8562ef26b3/LICENSE
+      sha256: 804821a9171f6eb0e0d26635922480bf479c2d646c2609f6273a85191949b8df
+    files:
+    - path: website/src/repl/drum_patterns.mjs
+      sha256: 14f057bd0b2123414b0b763fcf861947de4aaa544a3803aa7eff8b1a3ec5377e
+      format: module_templates
+      expected_candidates: 492

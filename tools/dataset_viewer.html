@@ -1,0 +1,225 @@
+<!doctype html>
+<!-- Local JSONL inspection. Playback is delegated to the official, cross-origin Strudel REPL. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuneLM dataset listener</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #111519; color: #e4e9ee; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 1440px; padding: 28px; }
+    h1 { margin: 0; font-size: 1.7rem; } h2 { font-size: 1rem; margin: 0 0 10px; color: #a8b9c8; }
+    p { margin: 8px 0 16px; } .hint { color: #9eafbd; font-size: .9rem; }
+    button, select, input { font: inherit; border: 1px solid #435463; border-radius: 7px; background: #202b34; color: inherit; padding: 8px 12px; }
+    button { cursor: pointer; } button:hover { background: #344957; } button:disabled { opacity: .4; cursor: default; }
+    input[type="search"] { flex: 1; min-width: 160px; }
+    label { display: flex; align-items: center; gap: 8px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 18px 0; }
+    #drop { border: 1px dashed #536a7b; border-radius: 10px; padding: 18px; background: #19222a; }
+    #drop.active { border-color: #77dbba; }
+    #notice { min-height: 24px; color: #92dfc2; overflow-wrap: anywhere; }
+    main { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 20px; }
+    #list { max-height: 75vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+    #list button { text-align: left; } #list button[aria-current="true"] { border-color: #77dbba; background: #254038; }
+    #list small { display: block; color: #b3c3ce; }
+    .card { padding: 18px; border: 1px solid #303f4b; border-radius: 10px; background: #181f26; margin-bottom: 16px; }
+    .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .badge { background: #293a46; border-radius: 20px; padding: 4px 12px; font-size: .85rem; }
+    pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 ui-monospace, monospace; }
+    #prompt { white-space: pre-wrap; } details summary { cursor: pointer; color: #b8ccda; margin-bottom: 8px; }
+    iframe { width: 100%; height: 450px; border: 1px solid #435463; border-radius: 8px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 800px) { body { padding: 16px; } main { grid-template-columns: 1fr; } #list { max-height: 220px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TuneLM dataset listener</h1>
+    <p class="hint">Browse prompts, code, retrieval context, verification, and teacher attempts. Files stay in your browser.
+      Loading the player sends only the selected code to strudel.cc; playback and sample downloads need internet.</p>
+  </header>
+  <section id="drop" aria-label="Load dataset">
+    <label>Open JSONL / JSON <input id="files" type="file" accept=".jsonl,.json" multiple></label>
+    <p class="hint">Choose accepted.jsonl, attempts.jsonl, SFT/RL exports, or existing seeds. Add jobs.jsonl alongside attempts.jsonl to see rejected jobs' plans and context. You can also drop files here.</p>
+  </section>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search prompt, model, source, code…" aria-label="Search records">
+    <label>Type <select id="category"><option value="">All</option></select></label>
+    <label>Status <select id="status"><option value="">All</option></select></label>
+    <label>Request <select id="style"><option value="">All</option></select></label>
+    <button id="previous" disabled>← Previous</button><button id="next" disabled>Next →</button>
+  </div>
+  <p id="notice" role="status" aria-live="polite">Open a dataset to begin.</p>
+  <main>
+    <nav id="list" aria-label="Dataset records"></nav>
+    <article id="detail" hidden>
+      <div class="badges" id="badges"></div>
+      <section class="card"><h2>Request</h2><div id="prompt"></div></section>
+      <section class="card">
+        <h2>Listen</h2>
+        <div class="toolbar"><button id="play">Load Strudel player</button><button id="stop" disabled>Stop / close player</button></div>
+        <p id="player-note" class="hint">Load the player, then click play inside it. Changing records stops playback. The player uses the current official Strudel runtime; the dataset verifier is pinned separately.</p>
+        <div id="player"></div>
+      </section>
+      <section class="card"><h2>Strudel code</h2><pre id="code"></pre></section>
+      <section class="card"><h2>Musical decisions</h2><pre id="summary"></pre></section>
+      <section class="card"><h2>Feedback / token usage</h2><pre id="feedback"></pre></section>
+      <details class="card"><summary>Plan and retrieval context</summary><pre id="context"></pre></details>
+      <details class="card"><summary>Complete record and metadata</summary><pre id="raw"></pre></details>
+    </article>
+  </main>
+  <script>
+    // Normalize display shapes only; JSONL remains the authoritative dataset format.
+    const byId = (id) => document.getElementById(id);
+    let records = [], filtered = [], selected = 0;
+
+    function parseFile(text, name) {
+      if (name.endsWith('.json')) {
+        const value = JSON.parse(text);
+        return Array.isArray(value) ? value : [value];
+      }
+      return text.split(/\r?\n/).flatMap((line, index) => {
+        if (!line.trim()) return [];
+        try { return [JSON.parse(line)]; }
+        catch { throw new Error(`${name}, line ${index + 1}: invalid JSON`); }
+      });
+    }
+
+    function recordStatus(row) {
+      if ('retry' in row) return row.accepted ? 'accepted attempt' : 'rejected attempt';
+      if (row.task) return 'candidate';
+      if (row.teacher) return 'accepted';
+      return row.code ? 'source' : 'prompt only (RL / evaluation)';
+    }
+
+    function normalize(entry, jobs) {
+      const row = entry.raw;
+      const job = jobs.get(row.job_index) ?? {};
+      const value = { ...job.task, ...job, ...row.task, ...row, ...row.reply, ...row.accepted };
+      if ('retry' in row && !row.reply && !row.accepted) value.code = null;
+      return { ...entry, value, status: recordStatus(row), category: value.plan?.category ?? value.category ?? 'unknown' };
+    }
+
+    async function openFiles(files) {
+      stopPlayer();
+      try {
+        const loaded = await Promise.all(Array.from(files, async (file) => {
+          const rows = parseFile(await file.text(), file.name);
+          return rows.map((raw, index) => {
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${file.name}: expected records`);
+            return { raw, file: file.name, line: index + 1 };
+          });
+        }));
+        const entries = loaded.flat();
+        const jobs = new Map(entries.filter((e) => e.raw.task && e.raw.code).map((e) => [e.line - 1, e.raw]));
+        records = entries.map((entry) => normalize(entry, jobs));
+        populateFilter('category', records.map((row) => row.category));
+        populateFilter('status', records.map((row) => row.status));
+        populateFilter('style', records.map((row) => row.value.prompt_style ?? 'legacy / unspecified'));
+        applyFilters();
+      } catch (error) { byId('notice').textContent = error.message; }
+    }
+
+    function populateFilter(id, values) {
+      const select = byId(id);
+      select.replaceChildren(new Option('All', ''));
+      for (const value of [...new Set(values)].sort()) select.add(new Option(value, value));
+    }
+
+    function applyFilters() {
+      const query = byId('search').value.trim().toLowerCase();
+      filtered = records.filter((row) => {
+        if (byId('category').value && row.category !== byId('category').value) return false;
+        if (byId('status').value && row.status !== byId('status').value) return false;
+        if (byId('style').value && (row.value.prompt_style ?? 'legacy / unspecified') !== byId('style').value) return false;
+        return JSON.stringify(row.value).toLowerCase().includes(query);
+      });
+      selected = 0;
+      renderList();
+      showSelected();
+    }
+
+    function renderList() {
+      byId('list').replaceChildren();
+      filtered.forEach((row, index) => {
+        const button = document.createElement('button');
+        button.append(document.createTextNode(`${index + 1}. ${row.category} · ${row.status}`));
+        const small = document.createElement('small');
+        small.textContent = (row.value.prompt ?? row.value.description ?? row.value.id ?? row.file).slice(0, 90);
+        button.append(small);
+        button.onclick = () => { selected = index; showSelected(); };
+        byId('list').append(button);
+      });
+    }
+
+    function format(value) { return JSON.stringify(value, null, 2); }
+
+    function showSelected() {
+      stopPlayer();
+      const row = filtered[selected];
+      byId('detail').hidden = !row;
+      byId('previous').disabled = selected <= 0;
+      byId('next').disabled = selected >= filtered.length - 1;
+      byId('notice').textContent = `${filtered.length} of ${records.length} records`;
+      if (!row) return;
+      byId('notice').textContent += ` · ${selected + 1} / ${filtered.length} · ${row.file}:${row.line}`;
+      const value = row.value;
+      for (const [index, button] of Array.from(byId('list').children).entries()) button.setAttribute('aria-current', String(index === selected));
+      byId('badges').replaceChildren();
+      const labels = [row.category, row.status, value.teacher ?? value.model_id, value.persona, value.pathway,
+        value.prompt_style, value.prompt_scenario,
+        value.retrieval_regime, value.split, value.plan?.bpm ? `${value.plan.bpm} BPM` : '', value.plan?.key];
+      labels.filter(Boolean).forEach((label) => {
+        const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = label;
+        byId('badges').append(badge);
+      });
+      byId('prompt').textContent = value.prompt ?? value.description ?? '(No request on this record)';
+      byId('code').textContent = value.code ?? '(Answer-free task: no code to play)';
+      byId('summary').textContent = value.summary ?? value.decisions?.map((s, i) => `${i + 1}. ${s}`).join('\n') ?? '—';
+      byId('feedback').textContent = format({ feedback: row.raw.feedback ?? [], usage: row.raw.usage ?? null,
+        verification: value.verification ?? row.raw.score?.diagnostic ?? value.telemetry ?? null });
+      byId('context').textContent = format({ plan: value.plan, context: value.context,
+        source_families: value.source_families, retrieved_ids: value.retrieved_ids });
+      byId('raw').textContent = format(row.raw);
+      byId('play').disabled = typeof value.code !== 'string' || !value.code.trim();
+    }
+
+    function stopPlayer() {
+      byId('player').replaceChildren();
+      byId('stop').disabled = true;
+    }
+
+    function loadPlayer() {
+      const code = filtered[selected]?.value.code;
+      if (!code) return;
+      stopPlayer();
+      const bytes = new TextEncoder().encode(code);
+      const base64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
+      const frame = document.createElement('iframe');
+      frame.title = 'Strudel music player';
+      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+      frame.setAttribute('allow', 'autoplay');
+      frame.referrerPolicy = 'no-referrer';
+      frame.src = `https://strudel.cc/#${encodeURIComponent(base64)}`;
+      byId('player').append(frame);
+      byId('stop').disabled = false;
+    }
+
+    byId('files').onchange = (event) => openFiles(event.target.files);
+    byId('search').oninput = applyFilters;
+    byId('category').onchange = applyFilters;
+    byId('status').onchange = applyFilters;
+    byId('style').onchange = applyFilters;
+    byId('previous').onclick = () => { selected -= 1; showSelected(); };
+    byId('next').onclick = () => { selected += 1; showSelected(); };
+    byId('play').onclick = loadPlayer;
+    byId('stop').onclick = stopPlayer;
+    byId('drop').ondragover = (event) => { event.preventDefault(); byId('drop').classList.add('active'); };
+    byId('drop').ondragleave = () => byId('drop').classList.remove('active');
+    byId('drop').ondrop = (event) => {
+      event.preventDefault(); byId('drop').classList.remove('active'); openFiles(event.dataTransfer.files);
+    };
+  </script>
+</body>
+</html>

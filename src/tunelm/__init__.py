@@ -1,3 +1,6 @@
-"""TuneLM: verifiable Strudel music model training tools."""
+"""Grounded Strudel music generation with compositional memory.
 
-__version__ = "0.1.0"
+The CLI coordinates the corpus, verifier, and required SFT/GRPO training stages.
+"""
+
+__version__ = "0.2.0"

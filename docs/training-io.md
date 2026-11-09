@@ -1,181 +1,124 @@
-# Training input and output formats
+# Data and model contracts
 
-TuneLM has three task types—`compose`, `edit`, and `repair`—and two training
-stages. Both stages show the model the same shared system instruction (defined
-in `src/tunelm/models/templates.py`) followed by one task-specific user
-message. The model is instructed to return **one complete JSON object**, not audio, a
-code diff, Markdown, or a multi-message conversation.
+All records use `schema_version: 2`, strict Pydantic schemas, and UTF-8 JSON.
+JSONL stores one complete object per line. Code and summaries remain strings with
+preserved newlines. JSON writes reject non-finite numbers; manifests are replaced
+atomically. Journals recover only an interrupted final line and reject corruption
+in earlier lines. New writes resolving into `archive/` fail.
 
-## What each stage stores and trains on
+## Canonical data and derived files
 
-| Stage | JSONL input | Model input | Target / output |
-|---|---|---|---|
-| SFT | `datasets/sft/train.jsonl`: task fields, a teacher `response`, and `metadata` | System instruction + formatted task user message | The serialized `response` JSON followed by the tokenizer's end-of-sequence token. Loss applies only to this completion. |
-| GRPO (RL) | `datasets/rl/quality_train.jsonl`: task fields, **no** `response` | The same system instruction + formatted task user message | The policy samples complete JSON responses. Format, execution, response consistency, prompt-stated constraints, edit, repair, and compose richness rewards score them; there is no gold completion in this file. |
+| Artifact | Format |
+| --- | --- |
+| Source and stem records; SFT/GRPO/benchmark tasks | JSONL |
+| Runtime configs, explicit plans, API/sound registry | YAML |
+| Split, corpus, run, and summary manifests | JSON |
+| Dense embedding matrix | NumPy `.npy`, no pickle; row IDs/model/revision in JSON |
+| Retrieval index | Rebuildable SQLite, with a matching memory version |
+| Model/adapter weights | safetensors plus native tokenizer/config JSON and custom code files |
+| Native periodic training checkpoints | Framework optimizer/RNG/trainer state |
 
-Each JSONL file has one JSON object per line. The examples below show the
-relevant fields, not every optional/default field that a generated row may
-contain. In particular, serialized SFT rows may contain `null` fields for
-other task types. `id`, `task_type`, and the verifier fields select/score the
-task; they are **not** automatically pasted into the model's user message.
-Only requirements expressed in natural-language `prompt` (and, for edit, its
-`instruction`/`preserve` context) are visible to the model.
+See [datasets/README](../datasets/README.md) for output paths. Legacy data is under
+`archive/datasets/`; it is not accepted as the new schema implicitly.
 
-### Compose
+## Sources and stems
 
-Stored task fields (the SFT row also has `response` and `metadata`):
+Input Source fields: `id`, `family`, `source`, `license`, `code`, `description`,
+optional `role`, optional `split`, and `tags`. Use a source URL or a repository
+path with enough provenance to recover the original. A family groups all related
+versions and derivatives of a composition; split the family together.
 
-```json
+Source splits are `train`, `val`, or `benchmark`. An omitted split is assigned
+deterministically by family hash (80/10/10); very small corpora should use explicit
+splits. Source date is not inferred from collection time. Ingested seeds also save
+code hash, verifier version, tempo/key facts, category, roles, and telemetry.
+
+The collector writes candidate Sources to `datasets/sources/seeds.jsonl` and
+external provenance to `datasets/sources/provenance.jsonl`: source ID, pinned URL
+and line, repository/revision, upstream source path/hash, license scope/evidence,
+and applied normalization. Local rows keep existing provenance. Collection time
+and candidate/provenance/duplicate/local-input hashes are in `collection.json`.
+Downloads are temporary; notices are under `datasets/sources/licenses/`, with
+evidence URLs/checksums in provenance. Only accepted rows become canonical
+`datasets/seeds/compositions.jsonl`. Candidates include later rejections.
+
+Stem records retain original expression/setup, source ID/family/license/hash,
+role/confidence, description/tags, methods, telemetry, and verifier version.
+Roles: `drums_core`, `perc_tops`, `bass`, `chords_pad`, `arp_lead`, `fx_texture`.
+Only verified training stems enter memory.
+
+## Composition plan
+
+Example explicit plan (JSON notation is also valid YAML):
+
+```yaml
 {
-  "id": "compose-001",
-  "task_type": "compose",
-  "prompt": "Compose a mellow 90 BPM piano piece that gradually adds a soft bass.",
-  "constraints": {
-    "tempo": 90,
-    "required_instruments": ["gm_piano", "sine"],
-    "min_layers": 2
-  }
+  "schema_version": 2,
+  "bpm": 120,
+  "key": "C:minor",
+  "category": "stack",
+  "voices": [
+    {"role": "drums_core", "query": "909 kick and backbeat", "density": [2, 24]},
+    {"role": "bass", "query": "low minor saw bass", "density": [1, 16]}
+  ],
+  "explicit": ["bpm", "key", "roles"],
+  "short_loop": false,
+  "cycles": 16,
+  "original_code": null,
+  "preserve": []
 }
 ```
 
-The model-visible **user** message is exactly the `prompt` text:
+Categories: `atomic`, `stack`, `arrange`, `cocreate`. There are 1–6 voices and
+8–64 requested evaluation cycles. `key` may be null for unpitched material. CPM is
+derived as BPM/4. `original_code` is an immutable supplied voice during co-creation;
+the current preservation gate requires its exact code substring. Fine-grained
+semantic editing/preservation is not implemented. The only supported `preserve`
+entry is `original_code`, and it requires that code to be supplied.
 
-```text
-Compose a mellow 90 BPM piano piece that gradually adds a soft bass.
+## Assistant completion and SFT masking
+
+````text
+<think>
+1. 120 BPM, C minor, a layered groove.
+2. A 909 kick and backbeat.
+3. Low minor saw bass.
+4. Slow filter motion on the bass.
+5. Moderate gains with separated registers.
+</think>
+```strudel
+setcpm(120/4);
+stack(s("bd*4, [~ sd]*2").bank("RolandTR909").gain(0.4),
+      n("<0 3 5 7>").scale("C2:minor").s("sawtooth").lpf(sine.range(300,1500).slow(8)).gain(0.4))
 ```
+````
 
-The output is a complete composition with a plan, controls, and executable
-Strudel. Machine-readable `constraints` stay on the dataset row for validation
-and rewards; the 90 BPM requirement is visible here because the prompt itself
-says it. GRPO scores only constraints the prompt states: had this prompt said
-"a mellow piano piece", the tempo and `min_layers` targets would be dropped
-from the reward (piano is still named, so that instrument check would remain).
+The outer text fence above illustrates the serialized completion. It contains
+exactly five numbered musical decisions and one executable code block, without
+additional prose. These summaries describe musical choices, not a claim to have
+captured a model's private internal reasoning.
 
-### Edit
+Task rows contain prompt, plan, packed context, source families, split, memory
+version, retrieval regime, and retrieved stem IDs. SFT Example adds summary/code,
+teacher identifier (`provider:model`), model-profile `teacher_id`, seed ID, pathway/persona, verified telemetry, and verifier
+version. The checkpoint template is used consistently across SFT, GRPO, and
+inference. Its opening `<think>` belongs to the generation prefix. Tokenization
+requires the full conversation to begin with exactly those prompt token IDs,
+masks that prefix, and supervises the remaining assistant content including EOS.
+Overlength targets are rejected rather than truncated.
 
-Stored task fields (again, SFT additionally stores `response` and `metadata`):
+RL and benchmark rows are strict Task records with no Example solution fields.
+GRPO receives rendered prompts plus plan JSON/task IDs for reward computation.
+Native trainer callbacks receive only the generated continuation; the reward
+adapter restores the already-prefilled opening tag before strict parsing.
+Scoring logs completion, total/component rewards, and verifier diagnostics.
 
-```json
-{
-  "id": "edit-001",
-  "task_type": "edit",
-  "prompt": "Make the bass busier without changing the drums.",
-  "instruction": "Increase bass activity and preserve the drum pattern.",
-  "original_code": "setcpm(120/4)\nconst drums = s('bd sd').bank('RolandTR909')\nconst bass = note('c2 ~ g2 ~').s('sawtooth')\nstack(drums, bass)",
-  "preserve": ["tempo", "drums"],
-  "expected_changes": {"drum_density": "unchanged", "layer_count": "unchanged"},
-  "constraints": {}
-}
-```
+## Verification response
 
-The model-visible user message is assembled with blank lines between parts:
-
-```text
-Make the bass busier without changing the drums.
-
-Edit instruction: Increase bass activity and preserve the drum pattern.
-
-Original Strudel:
-setcpm(120/4)
-const drums = s('bd sd').bank('RolandTR909')
-const bass = note('c2 ~ g2 ~').s('sawtooth')
-stack(drums, bass)
-
-Preserve: tempo, drums
-```
-
-If `instruction` equals `prompt`, the extra `Edit instruction:` paragraph is
-omitted. An empty preserve list appears as `Preserve: nothing specified`.
-`expected_changes` is **not** shown to the model; the reward uses it to check
-the edit. The output must contain the **entire revised Strudel program** and
-updated plan/controls, not just changed lines.
-
-### Repair
-
-Stored task fields (SFT also has `response` and `metadata`):
-
-```json
-{
-  "id": "repair-001",
-  "task_type": "repair",
-  "prompt": "Fix the syntax while keeping the same groove.",
-  "broken_code": "setcpm(110/4)\ns('bd sd'",
-  "reference_code": "setcpm(110/4)\ns('bd sd').bank('RolandTR909')",
-  "corruption": "missing_closing_parenthesis",
-  "constraints": {}
-}
-```
-
-The model-visible user message is:
-
-```text
-Fix the syntax while keeping the same groove.
-
-Repair this Strudel program:
-
-setcpm(110/4)
-s('bd sd'
-```
-
-`reference_code` and `corruption` remain hidden. The reference, when present,
-helps score repair consistency. The output is the **complete fixed program**
-inside the same JSON contract; it should retain the musical idea.
-
-## Shared assistant response
-
-All three tasks use this shape for an SFT teacher label, a GRPO candidate, and
-an inference result. This is an illustrative valid-shape response to the edit
-example above:
-
-```json
-{
-  "plan": {
-    "tempo": 120,
-    "instruments": ["RolandTR909", "bd", "sd", "sawtooth"],
-    "structure": "Drum groove with a more active bass line",
-    "musical_intent": "Keep the beat steady while the bass adds motion"
-  },
-  "controls": {
-    "bpm": 120,
-    "key": "C:minor",
-    "mood": [],
-    "layers": [
-      {"id": "drums", "role": "rhythm", "sounds": ["bd", "sd"]},
-      {"id": "bass", "role": "bass", "sounds": ["sawtooth"]}
-    ]
-  },
-  "strudel_code": "setcpm(120/4)\nconst drums = s('bd sd').bank('RolandTR909')\nconst bass = note('c2 g2 eb2 g2').s('sawtooth')\nstack(drums, bass)"
-}
-```
-
-`plan` is the human-readable summary; `controls` is the machine-editable
-description and must agree with `strudel_code`. Required top-level fields are
-exactly `plan`, `controls`, and `strudel_code`; the strict schema rejects extra
-or missing fields. `controls.bpm` is 20–400, `key` may be `null`, `mood` is an
-array, and `layers` contains at least one `{id, role, sounds}` object. The
-program's final expression must evaluate to the composition. Compose outputs
-should have adequate musical form/length; edit and repair outputs should
-preserve unaffected parts. See `src/tunelm/schemas.py` and the shared system
-instruction in `src/tunelm/models/templates.py` for the exact contract.
-
-## Conversion into trainer inputs
-
-- SFT converts a row to a chat-templated prompt (`system` + `user` + assistant
-  generation prefix) and a serialized assistant JSON completion. The teacher
-  `response` is never included in the prompt. The training set's original
-  columns are removed after conversion.
-- GRPO (`tunelm.rl.trainer.prepare_rl_row`) replaces the stored text `prompt`
-  with a conversational `prompt` containing `system` and `user` messages and
-  keeps a fixed set of reward columns on **every** row: `task_type`,
-  `constraints` (pruned to what the prompt states), `short_loop`, `original_code`,
-  `expected_changes`, `preserve`, and `reference_code` (`null` when not
-  applicable). Uniform columns are required because Arrow cannot store a mixed
-  task bank whose rows have different keys. Inapplicable rewards return `None`
-  rather than rewarding a missing constraint.
-- The current training format is **single-turn**. Edit provides the current
-  Strudel source, not a serialized history of earlier conversation turns. A
-  conversational application must supply the latest code in each edit request;
-  multi-turn history training would require an explicit dataset/formatter change.
-
-For the pipeline diagrams, see [workflows.md](workflows.md). For commands and
-configuration, see [usage.md](usage.md).
+Requests specify schema version, operation, code, cycles, and event limits.
+Operations are `verify`, `decompose`, and supported literal-scale `transpose`.
+Responses include validity, failure stage/code/message, runtime version, elapsed
+time, actual cycle window, and bounded events/telemetry when successful.
+Failure stages distinguish syntax, runtime setup, evaluation, arc querying,
+sound catalog, timeout, and protocol limits. No downstream control flow parses
+human-readable error messages.

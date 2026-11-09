@@ -1,177 +1,69 @@
 # TuneLM
 
-TuneLM trains small language models to **compose, edit, and repair** executable
-[Strudel](https://strudel.cc/) music programs. Completions are JSON: a music
-plan, inspectable controls, and Strudel code that a verifier can run. Audio
-rendering and subjective quality rewards are out of scope for this milestone.
+TuneLM generates executable [Strudel](https://strudel.cc/) music using compositional
+memory and [`LiquidAI/LFM3-1.7B-Base`](https://huggingface.co/LiquidAI/LFM3-1.7B-Base).
+Runtime settings live in YAML under `configs/`; datasets remain plain JSONL.
+The implementation includes pinned licensed-source collection, ingestion, AST stem extraction,
+headless verification, retrieval/planning, grounded teacher generation with OpenAI,
+Gemini, or Claude, **SFT and GRPO RL**, inference, and offline evaluation.
 
-Data creation, SFT, RL task banks, GRPO, and evaluation are separate pipelines.
-YAML configs select the model and stage; Python owns schemas, execution, and
-rewards.
+**Status (2026-11-06): implementation written and local smoke checks passed.**
+Training, paid teacher generation, model inference, and Vast.ai jobs have not run,
+as requested. GPU behavior and musical quality remain unverified. The linked
+checkpoint is LFM3 1.7B, pinned by revision.
 
-| Doc | Contents |
-|-----|----------|
-| [docs/usage.md](docs/usage.md) | Setup, generation, training, eval, JarvisLabs |
-| [docs/workflows.md](docs/workflows.md) | Staged SFT/RL diagrams |
-| [docs/training-io.md](docs/training-io.md) | Per-task SFT/GRPO inputs and shared response format |
-| [docs/implementation.md](docs/implementation.md) | Architecture and contracts |
+Seed collection/ingestion has run: **516 accepted compositions and 662 verified
+stems**. The full accepted list is `datasets/seeds/compositions.jsonl`; memory
+building and teacher generation are the next separate commands.
+The 19-source allowlist includes MIT, CC0, GPL, and AGPL scopes; source downloads
+are temporary. See [source research](docs/source-research.md) for per-source results.
 
-## What the model emits
+| Document | Contents |
+| --- | --- |
+| [Usage](docs/usage.md) | Setup, corpus, generation, SFT/GRPO, inference, future Vast.ai run |
+| [Implementation](docs/implementation.md) | Actual architecture, limits, and design choices |
+| [Training I/O](docs/training-io.md) | JSON/JSONL, model contract, masking, and reward records |
+| [Verification](docs/verification.md) | Checks performed and what remains unrun |
+| [Data layout](datasets/README.md) | Canonical data and derived artifacts |
+| [Original plan](design_docs/implementation-plan.md) | Requirements, source proposals, and implementation sequence |
 
-Every completion is one JSON object (`src/tunelm/schemas.py`). Missing or extra
-fields are rejected.
-
-```json
-{
-  "plan": {
-    "tempo": 120,
-    "instruments": ["bd", "sd", "bass"],
-    "structure": "intro, build, ending",
-    "musical_intent": "driving electronic groove"
-  },
-  "controls": {
-    "bpm": 120,
-    "key": "C:minor",
-    "mood": ["driving"],
-    "layers": [
-      {"id": "drums", "role": "rhythm", "sounds": ["bd", "sd"]},
-      {"id": "bass", "role": "bass", "sounds": ["bass"]}
-    ]
-  },
-  "strudel_code": "setcpm(120/4)\nstack(s(\"bd sd\"), note(\"c2 g2\").s(\"gm_electric_bass_finger\"))"
-}
-```
-
-SFT labels, GRPO rollouts, and inference share this contract and the same
-system prompt.
-
-## Tasks
-
-| Type | What the model does | How success is scored |
-|------|---------------------|------------------------|
-| **Compose** | Write a new pattern from a natural-language request | Execution + optional tempo/instrument/layer constraints |
-| **Edit** | Change existing Strudel in a requested direction | Execution + directional edit consistency |
-| **Repair** | Fix broken Strudel | Execution + overlap with a valid reference |
-
-User-facing prompts stay natural language. Machine-verifiable constraints live
-on the task row for validation and RL rewards; they are not stuffed into the
-training user message.
-
-## Pipeline
-
-```text
-vocab + teachers  →  SFT JSONL  →  SFT LoRA
-procedural tasks  →  RL JSONL   →  GRPO  →  benchmark eval
-```
-
-1. Generate teacher-validated SFT rows (`configs/data/sft.yaml`).
-2. Generate an RL task bank with no solutions (`configs/data/rl_tasks.yaml`).
-3. Supervised-fine-tune Gemma 4 E4B (default) or Qwen3 0.6B.
-4. GRPO against format, execution, constraint, edit, and repair rewards.
-5. Score a fixed 500-task benchmark (`configs/data/benchmark.yaml`).
-
-Teacher solutions are never stored in RL files. Reward functions do not import
-trainer internals.
-
-## Setup
-
-Python 3.11+, Node.js 18+, and (for the supplied 4-bit configs) NVIDIA CUDA.
+## Local start
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev]'
-npm install
+pip install -e '.[train,memory,teacher,dev]'
+npm ci
+tunelm verify examples/groove.js --cycles 32
+python scripts/collect_seeds.py --config configs/sources.yaml --ingest
+tunelm build-memory --lexical
 ```
 
-Install extras when needed:
+Use `tunelm build-memory` for the configured semantic model instead of the explicit
+offline lexical baseline. Planning uses the pinned LFM tokenizer. Teacher calls
+and model execution require separate commands; see usage before launching them.
+Preview the configured multi-model sample mix without paid calls using
+`tunelm generate --config configs/generation.yaml --dry-run`.
+
+Required training order:
 
 ```bash
-pip install -e '.[providers,train]'   # teacher APIs + SFT/GRPO
-pip install torch                     # choose the CUDA build for the training host
+tunelm train-sft --config configs/sft-warmup.yaml
+tunelm train-sft --config configs/sft.yaml
+tunelm train-grpo --config configs/grpo.yaml
 ```
 
-Confirm the Strudel executor (after `npm install`):
+These require reviewed teacher-generated data and a CUDA host. Add `--dry-run
+--tokenize` to validate prerequisites without loading weights. No training jobs
+have been launched. `examples/seeds.jsonl` keeps the ten original starter inputs;
+the larger accepted collection is in `datasets/seeds/compositions.jsonl` after
+running the collector. Its small held-out set is not a production quality benchmark.
 
-```bash
-python - <<'PY'
-from tunelm.strudel import StrudelExecutor
-print(StrudelExecutor(backend="node").run('setcpm(120/4)\ns("bd sd")'))
-PY
-```
+New data uses `datasets/`, run outputs use `results/`, and adapters use
+`checkpoints/`. Legacy datasets, checkpoints, and results remain intact under
+ignored `contents_v1/`; see its [original dataset card](contents_v1/datasets/README.md).
+Code never writes into that archive. `.cursor/` guidance and local credentials
+remain in place. No unit tests were created; verification uses real inputs and
+manual smoke runs. Candidate-code execution needs an OS sandbox for hostile input.
 
-`backend="static"` is for schema and reward work without Node. Training configs
-can be checked without loading weights:
-
-```bash
-python scripts/train.py --config configs/gemma4_4b/smoke_sft.yaml --dry-run
-```
-
-## Generate data
-
-Export API keys in the shell, never in YAML. Supported backends: Gemini, OpenAI,
-Anthropic, OpenRouter, DeepSeek.
-
-```bash
-export GEMINI_API_KEY='...'
-
-# SFT (5k default; staged prompts → samples → validate → regenerate)
-python scripts/generate.py --config configs/data/sft.yaml
-
-# RL task bank (3k default; no teacher solutions)
-python scripts/generate.py --config configs/data/rl_tasks.yaml
-
-# Held-out benchmark (500 tasks, disjoint from the RL train set)
-python scripts/generate.py --config configs/data/benchmark.yaml
-```
-
-`scripts/validate_data.py` checks JSONL schema, mix, and optional execution.
-Smoke training without keys uses `datasets/sft/sample.jsonl` and
-`datasets/rl/sample.jsonl`.
-
-## Train and evaluate
-
-Configs live under `configs/<model>/` and `extends: model.yaml`.
-
-| Model | Hugging Face id | Role |
-|-------|-----------------|------|
-| Gemma 4 E4B | `google/gemma-4-E4B-it` | Default target; about 8B total parameters |
-| Qwen3 0.6B | `Qwen/Qwen3-0.6B` | Smaller text-only baseline |
-
-```bash
-python scripts/train.py --config configs/gemma4_4b/sft.yaml
-python scripts/train.py --config configs/gemma4_4b/grpo.yaml
-python scripts/train.py --config configs/eval/default.yaml \
-  --checkpoint checkpoints/gemma4-4b-grpo
-python scripts/infer.py "Create a slow piano piece with strings" \
-  --checkpoint checkpoints/gemma4-4b-grpo
-```
-
-`generate.py` and `train.py` route from the YAML shape (`tunelm-generate` /
-`tunelm-train` are the same entry points). Cloud GPU: see the JarvisLabs
-section in [docs/usage.md](docs/usage.md).
-
-The current framework decision and the separate recommendation for 27B-scale
-training are documented in [docs/training-frameworks.md](docs/training-frameworks.md).
-
-Default GRPO weights: format 0.1, execution 0.4, constraints 0.5, plus 0.5 edit
-or repair consistency on those task types.
-
-## Layout
-
-```text
-configs/          per-model training YAML and data/eval configs
-datasets/         generated JSONL (smoke fixtures are committed)
-src/tunelm/       schemas, Strudel executor, rewards, SFT/RL/train
-scripts/          generate.py, train.py, validate_data.py, infer.py
-```
-
-## Security
-
-Candidate Strudel runs in a short-lived Node process with a timeout and obvious
-I/O blocked. That is not a security boundary. Treat model output as untrusted
-code; use an OS/container sandbox for production or third-party inputs.
-
-## License
-
-AGPL-3.0-or-later.
+License: AGPL-3.0-or-later. Model and source-corpus licenses remain separate.

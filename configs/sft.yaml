@@ -1,0 +1,22 @@
+schema_version: 2
+stage: sft
+adapter: checkpoints/lfm3-warmup
+train_file: datasets/sft/train.jsonl
+val_file: datasets/sft/val.jsonl
+output_dir: checkpoints/lfm3-sft
+results_dir: results/lfm3-sft
+training:
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0002
+  warmup_ratio: 0.05
+  bf16: true
+  gradient_checkpointing: true
+  eval_strategy: steps
+  eval_steps: 50
+  save_steps: 50
+  logging_steps: 5
+  save_total_limit: 2
+  report_to: none
+  seed: 42

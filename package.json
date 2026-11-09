@@ -1,16 +1,16 @@
 {
-  "name": "tunelm-strudel-bridge",
+  "name": "tunelm-verifier",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "engines": { "node": ">=18" },
-  "scripts": {
-    "postinstall": "node scripts/strudel/patch-kabelsalat.mjs"
-  },
+  "engines": { "node": ">=22" },
+  "scripts": { "postinstall": "node verifier/patch-kabelsalat.mjs" },
   "dependencies": {
     "@strudel/core": "1.2.6",
     "@strudel/mini": "1.2.6",
     "@strudel/tonal": "1.2.6",
-    "@strudel/transpiler": "1.2.6"
+    "@strudel/transpiler": "1.2.6",
+    "acorn": "8.15.0",
+    "acorn-walk": "8.3.4"
   }
 }

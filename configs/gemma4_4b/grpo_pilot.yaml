@@ -1,8 +1,0 @@
-extends: grpo.yaml
-training:
-  output_dir: checkpoints/gemma4-4b-grpo-pilot-v1
-  max_steps: 60
-  eval_steps: 12
-  save_steps: 12
-  save_total_limit: 5
-  run_name: gemma4-4b-grpo-pilot-v1

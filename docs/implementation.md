@@ -1,536 +1,168 @@
 # TuneLM implementation
 
-## Scope
+Implemented 2026-11-06 for `LiquidAI/LFM3-1.7B-Base`. Both supervised fine-tuning
+and GRPO reinforcement learning are implemented. GPU training, teacher calls,
+model inference, and Vast.ai jobs remain unrun at the user's request.
 
-This repository implements the first research-system milestone described in
-`design_docs/plan.md`: common task contracts, an executable Strudel verifier,
-provider-independent SFT data creation, procedural RL tasks, SFT/GRPO training
-entry points, modular rewards, evaluation, and inference.
-
-Audio rendering and subjective music-quality rewards are deliberately deferred.
-They are expensive, hard to verify, and should only be introduced after the
-execution and constraint baselines are measured.
-
-## Architecture
+## Flow and ownership
 
 ```mermaid
 flowchart LR
-  P[Prompt + verifier constraints] --> T[Shared task schema]
-  T -->|SFT| L[Teacher provider router]
-  L --> O[Plan + Strudel JSON]
-  O --> X[Strudel executor]
-  X -->|valid only| S[SFT JSONL]
-  T -->|RL| R[Task bank JSONL]
-  S --> ST[SFT LoRA]
-  ST --> G[GRPO]
+  A[Pinned licensed source files] --> SC[Collection script]
+  SC --> S
+  S[Licensed source JSONL] --> I[Verify + AST decomposition]
+  I --> C[Canonical seed/stem JSONL]
+  C --> M[Training-only memory index]
+  P[Prompt or explicit plan] --> R[Filter/rank + bounded context]
+  M --> R
+  C --> G[Grounded teacher generation]
   R --> G
-  G --> C[Candidate response]
-  C --> W[Format / execution / constraint / metadata / edit / form rewards]
-  W --> G
-  C --> E[Fixed benchmark evaluation]
+  G --> V[Format + execution + musical gates]
+  V --> D[SFT examples + answer-free RL tasks]
+  D --> W[SFT warmup]
+  W --> F[Full-mixture SFT]
+  F --> B[Saved merged SFT base]
+  B --> RL[Fresh GRPO adapter + verifier rewards]
+  RL --> E[Frozen benchmark + listening review]
+  R --> N[Checkpoint inference]
+  N --> V
 ```
 
-The boundaries are intentional. Teacher solutions are never stored in RL task
-files, reward functions do not depend on trainer internals, and model selection
-lives in YAML.
-
-## Output contract
-
-Every model completion must be one JSON object:
-
-```json
-{
-  "plan": {
-    "tempo": 120,
-    "instruments": ["bd", "sd", "bass"],
-    "structure": "intro, build, ending",
-    "musical_intent": "driving electronic groove"
-  },
-  "controls": {
-    "bpm": 120,
-    "key": "C:minor",
-    "mood": ["driving"],
-    "layers": [
-      {"id": "drums", "role": "rhythm", "sounds": ["bd", "sd"]},
-      {"id": "bass", "role": "bass", "sounds": ["bass"]}
-    ]
-  },
-  "strudel_code": "setcpm(120/4)\nstack(s(\"bd sd\"), note(\"c2 g2\").s(\"gm_electric_bass_finger\"))"
-}
-```
-
-`src/tunelm/schemas.py` is the canonical contract. Pydantic rejects missing and
-unknown fields so format reward cannot silently accept a drifted representation.
-The response parser accepts plain JSON and a fenced JSON object for robustness,
-although the system prompt asks models to emit plain JSON.
-
-## System prompts
-
-Every LLM call in data generation, training formatting, and inference uses an
-explicit system prompt. Procedural-only paths (RL `mode: procedural` without
-`prompt_author`) fill prompts from vocab templates and never call a provider.
-
-| Workflow | Stage | System prompt | Location |
-|---|---|---|---|
-| SFT compose prompt | `prompts`, `full` | `LEVEL_SYSTEM_PROMPTS` (levels 1–4) | `src/tunelm/sft_data/prompt_author.py` |
-| SFT edit/repair prompt | `prompts`, `full` | `STYLE_SYSTEM_PROMPTS` (imperative, conversational, direct, …) | `src/tunelm/rl_data/prompt_author.py` |
-| SFT teacher response | `responses`, `full` | `SYSTEM_PROMPT` (plan + Strudel JSON contract) | `src/tunelm/models/templates.py` |
-| RL task prompt rewrite | `prompts`, `tasks`, `full` when `prompt_author` set | `STYLE_SYSTEM_PROMPTS` per task type | `src/tunelm/rl_data/prompt_author.py` |
-| RL hybrid task synthesis | `mode: hybrid` LLM slice only | `RL_LLM_TASK_SYSTEM_PROMPT` | `src/tunelm/rl_data/llm_generator.py` |
-| Inference / eval | runtime | `SYSTEM_PROMPT` (same as teacher) | `src/tunelm/models/templates.py` |
-
-SFT compose uses complexity levels; SFT edit/repair and RL prompt authoring use
-style personas (`compose_styles`, `edit_styles`, `repair_styles` in YAML, with
-built-in defaults in code). Teacher and inference share one response contract so
-SFT labels match what the model sees at deploy time.
-
-### Response system prompt (`SYSTEM_PROMPT`)
-
-SFT teacher generation, GRPO rollouts, and inference all use the same
-`SYSTEM_PROMPT` in `src/tunelm/models/templates.py`. It defines:
-
-- the `plan` + `controls` + `strudel_code` JSON contract (validated by `ModelResponse`)
-- a link to the [Strudel getting-started workshop](https://strudel.cc/workshop/getting-started/)
-- Strudel coding conventions the verifier expects (`setcpm`, `s`, `note`, `stack`,
-  mini-notation, sound identifiers from the user message)
-- per-task behavior for compose, edit, and repair
-- constraint satisfaction and sandbox rules (no `samples()`, network, or side effects)
-
-The user message from `task_user_prompt()` carries only what a real user would
-see: the natural-language prompt and, for edit/repair, original or broken Strudel
-code plus preserve lists. Machine-verifiable constraints stay on the task object
-for validation and RL rewards but are not injected into training or rollout
-messages.
-
-## Task schema
-
-All task kinds share `id`, `task_type`, `prompt`, `constraints`, `difficulty`,
-and `tags`.
-
-- `compose` adds no required fields. Success is defined by its constraints.
-- `edit` includes original code, an instruction, expected directional changes,
-  and named features to preserve.
-- `repair` includes broken code, a corruption label, and an optional valid
-  reference used by future structural-preservation rewards.
-
-Supported programmatic constraints are exact/ranged tempo, required and
-forbidden instruments, and minimum/maximum layer count. Mood is retained in the
-task but is not scored until a defensible audio or embedding verifier exists.
-
-## Strudel execution
-
-`StrudelExecutor` supports three backends:
-
-- `node` invokes the actual Strudel core, mini-notation, tonal, and transpiler
-  packages in a fresh Node process, queries the resulting pattern for a bounded
-  number of cycles, and returns normalized events.
-- `static` checks basic structure and extracts features without claiming full
-  execution. It is useful for development without npm packages.
-- `auto` tries Node and falls back to static only when Node or the packages are
-  unavailable. It does not hide ordinary Strudel execution errors.
-
-The analyzer extracts explicit BPM from `setcpm`/`setcps`, instrument/sample
-names, note names, a layer count, drum density, used functions, event count,
-and two temporal features: `active_cycles` (cycles with an audible onset) and
-`distinct_cycles` (distinct per-cycle event patterns). When the Node executor
-returns events, `instruments` comes from audible events (not muted by
-`gain(0)`), so names in dead code do not count; without events (static backend,
-edit/repair comparisons) it falls back to string arguments in the source.
-`layer_count` is the widest `stack(...)` argument count, or 1 without `stack`.
-`ExecutionResult.playable` means the code executed and produced events; the
-static backend cannot count events and is treated as playable. Node execution
-uses the tempo actually requested at runtime; commented-out `setcpm` text
-cannot earn tempo credit. Per-cycle variation compares sound and pitch events,
-not effect-only changes such as pan or gain automation.
-
-The current `@strudel/core` package imports `@kabelsalat/web` from an ESM entry
-point that its package metadata does not select under Node. The npm postinstall
-script at `scripts/strudel/patch-kabelsalat.mjs` switches that installed
-dependency to its published `dist/index.mjs`. It fails on an unexpected
-dependency version rather than silently starting training with a broken
-verifier. It does not modify TuneLM source or fetch a fork.
-
-### Security boundary
-
-Each candidate runs in a temporary working directory, with a small environment,
-a hard timeout, event cap, and obvious I/O/dynamic-import capabilities blocked.
-This limits accidents and most model output, but JavaScript evaluation is not a
-security boundary. Production evaluation of untrusted candidates must run the
-worker in a locked-down container or microVM with no credentials, no network,
-a read-only filesystem, and OS-level CPU/memory/process limits.
-
-## SFT data path
-
-1. The task generator creates a configurable mix of composition, precise-editing,
-   and corrupted-program repair tasks. Edit and repair tasks stay procedural from
-   `configs/data/vocab/`. Each compose task randomly picks complexity level 1–4,
-   samples a short procedural brief (mood, instruments, tempo, optional rhythm or
-   section hints), and derives explicit constraints from that brief.
-2. Compose prompts are authored separately from constraints. A configured
-   prompt-author model paraphrases each brief using a level-specific system
-   prompt and returns one natural-language `prompt`. Generation fails fast when
-   no enabled model has an API key.
-3. `ProviderRouter` selects configured model entries (`models` in YAML; legacy
-   `providers` is still supported). Backends: Gemini, OpenAI, Anthropic,
-   OpenRouter, and DeepSeek. Each entry is keyed by model id with
-   `enabled`, `provider`, and `model` (or `model_name`). With
-   `parallel_models: true`, teacher generation shards work across enabled models
-   in parallel threads.
-4. The teacher receives `messages_for_task()` with only the authored natural-language
-   prompt (plus edit/repair code context). Constraints remain on the task row for
-   validation and rewards but are not injected into the user message.
-5. The teacher completion is parsed and executed.
-6. Playable execution over eight cycles, prompt-stated constraints, response/code
-   agreement, compose form, edit success, and repair preservation are checked
-   as applicable. Invalid attempts can be
-   sent back once or more with the validator error and previous answer;
-   exhausted examples are dropped.
-7. Accepted rows record provider, model, UTC timestamp, validation details, and
-   compose tags such as `level-3` and `prompt-llm`.
-
-`stage` controls whether generation is split for human review. With
-`batch.enabled: true` (default), prompt authoring and teacher generation use the
-Gemini Batch API; Strudel validation runs locally in `validate` / `regenerate`.
-
-| Stage | Output |
-|---|---|
-| `prompts` | Task bank in `prompts_file` (same schema as RL tasks) |
-| `samples` | Teacher responses in `samples_file` (`metadata.valid` unset) |
-| `validate` | Updates `samples_file` flags + exports valid rows to `output` |
-| `regenerate` | Batch retry for `metadata.valid: false` rows |
-| `full` | prompts → samples → validate → regenerate loop |
-| `responses` | Alias for `samples` |
-
-Compose prompt authoring may use `compose.prompt_author` as a separate weighted
-provider router from the teacher `models` block.
-
-Model entries use the YAML key as the model id (`enabled`, `provider`, `model`).
-Supported backends: Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek.
-
-```mermaid
-flowchart LR
-  subgraph config [YAML models block]
-    M1[gemini-flash]
-    M2[deepseek-chat]
-    M3[openrouter-gemini]
-  end
-  subgraph keys [API keys]
-    K1[GEMINI_API_KEY]
-    K2[DEEPSEEK_API_KEY]
-    K3[OPENROUTER_API_KEY]
-  end
-  M1 --> K1
-  M2 --> K2
-  M3 --> K3
-  config --> R[ProviderRouter]
-  R -->|parallel_models| P[Per-model teacher shards]
-  R -->|weighted| W[Single-router generation]
-```
-
-The writer refuses to overwrite an existing dataset unless `append: true` is
-explicitly configured. This helps preserve expensive generations.
-
-### SFT workflow: `stage: prompts`
-
-```mermaid
-flowchart TD
-  A[configs/data/sft.yaml<br/>stage: prompts] --> B[Sample compose briefs<br/>levels 1–4]
-  B --> C[Prompt-author LLM<br/>compose.prompt_author.models]
-  C --> D[Procedural edit/repair skeletons]
-  D --> E[Prompt-author LLM<br/>edit/repair styles]
-  F --> G[Human review<br/>edit or delete rows]
-```
-
-### SFT workflow: `stage: samples` → `validate` → `regenerate`
-
-```mermaid
-flowchart TD
-  A[configs/data/sft.yaml<br/>stage: samples] --> B[Read prompts_file]
-  B --> C[Gemini Batch API<br/>teacher generation]
-  C --> D[datasets/sft/samples.jsonl]
-  D --> E[stage: validate]
-  E --> F[Strudel executor + validator]
-  F --> G[Set metadata.valid per row]
-  G --> H[datasets/sft/train.jsonl<br/>valid rows only]
-  G -->|invalid| I[stage: regenerate]
-  I --> J[Batch retry with validation error context]
-  J --> E
-```
-
-### SFT workflow: `stage: full`
-
-```mermaid
-flowchart TD
-  A[configs/data/sft.yaml<br/>stage: full] --> B[Batch prompt authoring]
-  B --> C[Batch teacher generation]
-  C --> D[Validate all samples]
-  D --> E{failed rows remain?}
-  E -->|yes| F[Batch regenerate]
-  F --> D
-  E -->|no| G[datasets/sft/train.jsonl]
-```
-
-Provider keys and the full cross-pipeline diagram live in [workflows.md](workflows.md).
-
-## RL task path
-
-`configs/data/rl_tasks.yaml` generates 3,000 tasks by default. When
-`prompt_author` is configured and `batch.enabled: true`, generation builds
-procedural skeletons first, then batch-rewrites musician-facing prompts with a
-random per-row style
-(compose: scene/musician/brief; edit: imperative/conversational; repair:
-direct/collaborative/diagnostic). For `scene` and `musician` the prompt author
-sees scene hints only, not constraint JSON. The `brief` style also receives the
-tempo, instruments, forbidden instruments, and minimum layers and must state
-them, so the constraint reward has visible targets. Verifier fields stay on the
-task; edit tasks keep `instruction` for rewards.
-
-RL `stage` mirrors SFT review flow:
-
-| Stage | Output |
-|---|---|
-| `prompts` | Reviewable bank in `prompts_file` |
-| `tasks` | Final `output` copied from curated `prompts_file` |
-| `full` | Direct write to `output` |
-
-Without `prompt_author`, legacy `mode: hybrid` still uses `llm_fraction` to
-generate full task specs via LLM when keys are set. `datasets/rl/train.jsonl`
-remains the committed smoke fixture. The benchmark config uses a separate seed
-and is kept disjoint from the train set.
-
-### RL workflow: `stage: prompts`
-
-```mermaid
-flowchart TD
-  A[configs/data/rl_tasks.yaml<br/>stage: prompts] --> B[Procedural task skeletons<br/>constraints + code fields]
-  B --> C[Random style per row]
-  C --> D[Gemini Batch API<br/>prompt_author.models]
-  D --> E[datasets/rl/prompts.jsonl]
-  E --> F[Human review<br/>edit or delete rows]
-```
-
-### RL workflow: `stage: tasks`
-
-```mermaid
-flowchart TD
-  A[configs/data/rl_tasks.yaml<br/>stage: tasks] --> B[Read curated prompts_file]
-  B --> C[Schema-validate each row]
-  C --> D[datasets/rl/train.jsonl]
-```
-
-### RL workflow: `stage: full`
-
-```mermaid
-flowchart TD
-  A[configs/data/rl_tasks.yaml<br/>stage: full] --> B{prompt_author configured?}
-  B -->|yes| C[Procedural skeletons + batch styled prompts]
-  B -->|no| D[Legacy procedural or hybrid llm_fraction]
-  C --> E[datasets/rl/train.jsonl]
-  D --> E
-```
-
-The procedural generator creates an exact requested count with a configurable
-mix. The `prompt` field is always the final varied request shown to the model;
-there is no separate generic prompt or hidden intent field. Composition tasks
-sample verifier-friendly combinations. Repair tasks
-mutate varied known-valid arrangements using the corruption handlers named in
-`configs/data/vocab/repair_templates.yaml`. Every configured corruption must
-have a matching handler. Editing tasks are drawn from verifier-supported tempo,
-instrument, layer-count, and drum-density changes.
-
-Musical vocabulary is data-driven under `configs/data/vocab/`: canonical
-instrument concepts, aliases and their executable Strudel sound identifiers,
-ensembles, moods, genres, rhythms, structures, textures, tempo ranges, compose
-prompts, edit operations, and repair templates. Both procedural and LLM-backed
-task generation consume these files. Prompts use musician-friendly instrument
-names while model messages include the corresponding built-in, `gm_*`, or
-percussion identifier expected by Strudel.cc.
-
-Each task retains a 1–5 difficulty value for analysis and future sampling
-policies. The current trainer shuffles the complete task bank.
-
-## Rewards
-
-Rewards are independent Python functions/classes:
-
-| Component | Current meaning |
-|---|---|
-| Format | Completion validates against the exact response schema |
-| Execution | Strudel produces a queryable pattern without an error **and** at least one event (playable) |
-| Constraints | Mean satisfaction across explicit tempo, instrument, and layer constraints that the prompt states |
-| Response consistency | Plan and controls tempo/instruments agree with executable code |
-| Edit consistency | Requested changes must succeed; preserved features and named `const` layers receive credit |
-| Repair consistency | Equality of tempo, instruments, notes, layer count, and drum density to the valid reference |
-| Richness (compose) | Audible coverage multiplied by musical variation across up to eight cycles; explicit short-loop requests are exempt |
-
-`RewardEngine` provides a normalized weighted score for offline evaluation.
-`RewardAdapter` exposes the same logic in TRL-compatible callables and shares an
-LRU-like execution cache so the execution and constraint rewards do not execute
-the same completion twice. Non-edit rows return `None` from the edit reward so
-TRL can ignore that reward for those samples. Constraint applicability is decided
-from the task, not the completion: `stated_constraints(prompt, constraints)`
-first drops targets the prompt never states (no "N BPM", instrument not named,
-no explicit layer count), then tasks without remaining constraints return
-`None`, while unplayable completions for constrained tasks receive zero. SFT
-teacher validation applies the same prompt-visible constraint rule.
-Edit, repair, and richness also receive zero when the candidate is not playable,
-so structural similarity cannot reward an unchanged broken or silent program.
-Richness returns `None` for edit/repair rows and for the static backend, which
-cannot produce events.
-
-Known limits: prompt-mention matching is keyword-based and can keep a
-constraint on an incidental word. Richness and response consistency are
-structural proxies, not audio or taste measurements. The quality workflow adds
-a listening review CSV for these judgments. Before GRPO, preflight checks the
-fraction of compose tasks with a visible, verifiable requirement.
-
-The checked-in SFT smoke fixture passes execution, constraint, plan/code, and
-edit/repair-consistency verification. SFT validation with `--check-execution`
-repeats that full validation rather than checking execution alone.
-
-Reward evolution should remain experimental and additive:
-
-1. Establish format + execution.
-2. Add explicit constraints.
-3. Measure and add editing consistency.
-4. Only then test rendered-audio or human preference rewards.
-
-## Configuration and CLI
-
-Training YAML lives under `configs/<model>/` (`gemma4_4b`, `qwen3_06b`). Each
-model directory has a shared `model.yaml` extended by `sft.yaml`, `grpo.yaml`,
-and smoke variants. Dataset generation configs stay under `configs/data/`.
-
-`src/tunelm/cli.py` is the unified entry point behind `scripts/generate.py` and
-`scripts/train.py`. Routing is inferred from the loaded config (SFT data when
-`models` or `providers` is set; evaluation when `tasks` and `predictions` are
-set; GRPO when `rewards` and training data are set; otherwise SFT).
-`src/tunelm/training_preflight.py`
-validates configs and dataset paths without loading model weights; use
-`scripts/train.py --dry-run` on a laptop.
-
-JarvisLabs launches a single config via `scripts/jarvislabs/cloud_train.py
---config ...`; there is no multi-stage pipeline config directory.
-
-## Training
-
-`SFTTrainer` consumes conversational prompt-completion rows and computes loss
-only on the assistant completion. `GRPOTrainer` consumes conversational prompts
-and custom reward functions; every RL row carries the same reward columns
-(`null` where not applicable) so mixed compose/edit/repair banks load into
-Arrow. GRPO holds out a task-stratified validation set before repeating compose
-training rows, and logs counts-aware per-task and weighted-objective metrics so
-inapplicable rewards do not poison validation aggregates. Both use a common
-causal-language-model loader and PEFT LoRA adapter, save their
-tokenizer/checkpoint, and write `experiment.json` with the full config, runtime,
-dataset size, timestamp, and Git commit when available.
-
-### SFT training workflow
-
-```mermaid
-flowchart TD
-  A[datasets/sft/train.jsonl] --> B[training_record<br/>prompt + assistant completion]
-  B --> C[Load base model from configs/model.yaml]
-  C --> D[Attach LoRA adapter]
-  D --> E[SFTTrainer]
-  E --> F[checkpoints/*-sft]
-  F --> G[experiment.json]
-```
-
-### GRPO training workflow
-
-```mermaid
-flowchart TD
-  A[datasets/rl/quality_train.jsonl] --> B[Hold out seeded validation tasks<br/>prepare_rl_row]
-  B --> C[Load merged SFT model from Hugging Face<br/>attach new LoRA]
-  C --> D[GRPOTrainer<br/>num_generations per prompt]
-  D --> E[Sample N completions from policy]
-  E --> F[RewardAdapter]
-  F --> G[Strudel executor cache]
-  G --> H[Group-relative advantage + policy update]
-  H --> I[checkpoints/*-grpo]
-  I --> J[experiment.json]
-```
-
-Gemma 4 E4B (`google/gemma-4-E4B-it`) is the default target. It has about 8B
-total parameters and 4B effective parameters. Qwen3 0.6B is the
-smaller baseline. TuneLM is text-only, so Gemma 4 deliberately loads its causal
-language-model component rather than its unused vision/audio towers. Model
-families can require different LoRA target-module names.
-
-### End-to-end pipeline
-
-```mermaid
-flowchart LR
-  subgraph sft_prep [SFT data prep]
-    SP[prompts.jsonl] --> ST[train.jsonl]
-  end
-  subgraph rl_prep [RL data prep]
-    RP[prompts.jsonl] --> RT[train.jsonl]
-  end
-  subgraph train [Training]
-    SFT[SFTTrainer]
-    GRPO[GRPOTrainer]
-    ST --> SFT
-    SFT --> GRPO
-    RT --> GRPO
-  end
-  subgraph eval [Evaluation]
-    BENCH[benchmark.jsonl]
-    EVAL[offline evaluator]
-    GRPO --> EVAL
-    BENCH --> EVAL
-  end
-```
-
-## Evaluation
-
-Benchmark generation uses a separate seed and output path. The benchmark should
-be generated once, versioned privately or checksummed, and never mixed into
-training data. Evaluation joins `{task_id, completion}` prediction rows to tasks,
-scores each independently, and writes both per-task JSONL and aggregate JSON.
-
-Current aggregate metrics include reward component means and total reward by
-task type. Plan consistency, diversity, and subjective preference remain future
-metrics because the current implementation does not pretend those are solved by
-string heuristics.
-
-### Evaluation workflow
-
-```mermaid
-flowchart TD
-  A[benchmark.jsonl] --> B[Load checkpoint]
-  B --> C[Generate completion per task]
-  C --> D[RewardEngine scores each row]
-  D --> E[Per-task JSONL + aggregate JSON]
-```
-
-## Implementation status
-
-| Plan area | Status |
-|---|---|
-| Shared schemas/repository structure | Implemented |
-| Fast Strudel execution and feature analysis | Implemented |
-| Provider abstraction | Implemented |
-| Externalized vocab/templates under `configs/data/vocab/` | Implemented |
-| Validated SFT generation | Implemented; requires API keys |
-| SFT LoRA entry point | Implemented; GPU run pending |
-| Procedural + hybrid RL task generation | Implemented |
-| Format/execution/constraint/edit/repair rewards | Implemented |
-| GRPO entry point | Implemented; GPU run pending |
-| Fixed benchmark and offline evaluator | Implemented |
-| Laptop-safe config verification (`train.py --dry-run`) | Implemented |
-| Per-model config layout (`gemma4_4b`, `qwen3_06b`) | Implemented |
-| Full audio rendering | Deferred |
-| Audio/human music preference | Deferred |
-| Adaptive weakness-driven tasks | Deferred |
-| Production serving/quantization | Deferred |
-
-## Design references
-
-- [Strudel packages](https://strudel.cc/technical-manual/packages/)
-- [Strudel REPL execution model](https://strudel.cc/technical-manual/repl/)
-- [TRL SFTTrainer](https://huggingface.co/docs/trl/sft_trainer)
-- [TRL GRPOTrainer](https://huggingface.co/docs/trl/grpo_trainer)
-- [Gemini structured output](https://ai.google.dev/gemini-api/docs/structured-output)
-- [OpenAI API quickstart](https://platform.openai.com/docs/quickstart)
+| Module | Owns |
+| --- | --- |
+| `schemas.py`, `io.py` | Versioned records, safe YAML configs, strict JSON data, atomic files, append journals, run locks, archive write protection |
+| `verifier/ast.mjs` | Accepted JS subset, `$:` normalization, dependencies, extraction, literal-scale transposition, bounded arrangement spans |
+| `verifier/runtime.mjs`, `verifier.py` | Native Strudel Haps, process deadlines, heap/event/output limits, catalog checking |
+| `telemetry.py` | Onset counts, pitches/register, syncopation, structural/control fingerprints |
+| `corpus.py` | Source/license manifests, stable family splits, seed and stem verification |
+| `scripts/collect_seeds.py`, `scripts/extract_seed_objects.mjs` | Source allowlist, pinned downloads/cache, literal extraction, provenance, deduplication, optional ingestion |
+| `memory.py`, `planner.py` | SQLite/NumPy indexes, embeddings, metadata filtering, ranking, typed plans, bounded XML context |
+| `synthesis.py`, `generation_state.py`, `responses.py`, `teachers.py` | Grounded generation, four personas, retrieval regimes, retries, shared summary/code contract, native provider adapters |
+| `training.py`, `rewards.py` | Completion-masked SFT, SFT-to-GRPO handoff, reward components, checkpoint/resume, preflight |
+| `inference.py`, `cli.py` | Explicit commands, prediction journals, offline scoring, missing/extra-ID reporting |
+
+These are intentionally ordinary Python modules, rather than many subpackages.
+All paths are relative to the repository root, and output helpers reject
+destinations resolving into `archive/`.
+
+## Verification boundary
+
+Each request starts a fresh Node process with only PATH in its environment and
+a temporary working directory. Defaults: 5-second wall deadline, 256 MiB V8 heap,
+20,000 Haps, 100 KB code, 128 KiB serialized request, and 32 MiB combined pipe
+output. Python drains bounded pipes and kills a timed-out worker. There is no
+static fallback. Logs go to stderr; stdout carries one versioned JSON response.
+
+Strudel 1.2.6 is pinned. The installed `@kabelsalat/web` 0.4.1 package needs its
+published ESM entry selected; the version-checked npm postinstall script does so.
+Runtime calls use the installed native evaluator, not the proposal's incorrect
+transpiler return-value assumptions. Browser visualizers are identity stubs.
+
+AST validation accepts immutable declarations, expressions, and bounded musical
+function chains. Imports, side-effect capabilities, loops, constructors, mutable
+declarations, and dynamic property access are rejected. `$:` tracks require setup
+before tracks. Extraction resolves named voices and copies their required global
+declarations, without treating every nested stack as a separate voice. Some
+complex programs are intentionally rejected rather than guessed at.
+
+Direct `arrange` expressions, const references, stacks, and literal slow/fast
+wrappers have their duration inspected. Verification expands to cover every
+declared section, up to 64 cycles; indeterminate or longer arrangements fail.
+General JavaScript cannot be proven to have a finite musical period. Absolute
+pitch and dynamic-scale transposition are not implemented; literal scale changes
+preserve octave and are reverified before use.
+
+VM checks/process limits are **not an OS security sandbox**. Run hostile or
+third-party programs in an isolated, network-disabled worker container without
+credentials or writable project mounts. No public execution service is provided.
+
+## Musical features and gates
+
+Hap whole/part spans and onset flags are preserved. Sustained events crossing a
+cycle boundary count once, MIDI pitch 0 is retained, and numeric controls are
+checked before JSON serialization. Sound and bank controls are combined for
+catalog validation; drum-machine/default Uzu drum-kit snapshots and a synth allowlist
+are checked in. Symbolic validity does not prove samples were downloaded or audio
+played. General MIDI/custom sounds require explicit catalog additions.
+
+Telemetry separates note/rhythm fingerprints from control automation. Evolution
+is evaluated in 8-cycle windows; the total queried window is stored. Rewards
+hard-gate malformed responses and failed execution, then average applicable
+instruction, scale, register/sound role, evolution, and gain proxies. Atomic or
+explicit static loops omit evolution rewards. Accepted teacher rows must satisfy
+explicit constraints and task-specific quality gates.
+
+Role coverage and gain checks are deliberately simple proxies. They cannot prove
+independent voice count, perceptual balance, artistic quality, or correspondence
+of every natural-language claim. Review teacher examples and listen before scaling.
+
+## Memory and data
+
+`configs/sources.yaml` lists reviewed source files, immutable revisions, checksums,
+and license evidence across GitHub and Codeberg. Downloads are temporary; parsed
+JSONL and notices are retained. Literal objects, exported templates, JSON examples,
+Markdown fences, and independent programs are extracted without executing modules.
+Named tracks can be canonicalized to `$:` while muted tracks remain omitted.
+Verified snapshot hashes support offline ingestion without raw files. Each external
+collection stays in one family; related upstream material can share an explicit
+origin family. MIT/CC0/GPL/AGPL scopes are supported, including Strudel's explicitly
+GPL-credited rhythm file. Source licensing is recorded separately from the
+surrounding application's license. See usage and source research for selections.
+
+Canonical records are UTF-8 JSON/JSONL. SQLite and normalized NumPy embeddings
+are rebuildable indexes. Default semantic embeddings use a pinned MiniLM model;
+`--lexical` explicitly selects a local bag-of-words baseline. Only training stems
+enter memory. Hard role/density filtering precedes semantic/method/evolution
+ranking at 0.65/0.25/0.10, with stable ID tie breaking. Missing roles are explicit.
+
+Basic prompt rules recognize common tempo, scale, voice, and arrangement cues.
+Use explicit Plan JSON for precise requirements or co-creation. This is not a
+general natural-language music planner. Context packing uses the LFM tokenizer,
+keeps whole XML/code items, and reports omissions at the 550-token budget.
+
+Ingestion assigns a source-family split before extraction; explicit split
+conflicts and exact duplicate compositions fail. Descendants inherit the split,
+and recombination stays within a split. Held-out targets never enter memory.
+Near-duplicate musical families still need corpus review; exact hashes do not
+establish semantic independence.
+
+Generation YAML lists all teacher models, providers, and accepted-sample fractions.
+Largest-remainder allocation produces exact per-model targets. Teacher calls use
+OpenAI-compatible, native Gemini, or native Anthropic Claude backends through one
+typed interface and explicit registry. SDK imports are lazy,
+provider-specific API-key defaults are used, and clients close at run completion.
+Gemini and Claude request structured JSON; all replies pass the same local schema
+and musical gates. Provider/model identities are saved with each teacher example
+and included in run fingerprints. Back-translation
+preserves verified code; recombination uses verified, transposed stems and native
+execution before teacher adaptation. High/partial/empty retrieval targets a
+40/40/20 mix; absent alternatives can increase the realized empty share. Accepted
+rows and attempts are separate, and retry history limits each model/job to three
+attempts across restarts. Frozen jobs, per-model cursors, crash-gap recovery, and
+exclusive run locks support resumption. Bounded replacement candidates fill each
+model quota; shortfalls are reported without reallocating the share. Input/model/
+tokenizer identities prevent mixing runs. See usage for the persisted state files.
+The 20/45/15/20 task mixture and 30,000 examples remain scaling targets, not claims
+about the tiny starter corpus.
+
+## Required training stages
+
+The checkpoint and modeling code are pinned to
+`7bca5038823c0d0f14efe06439109354a10e014c`. Reviewed architecture modules include
+attention projections, convolution input/output projections, and MLP `w1/w2/w3`;
+the LoRA defaults target those actual module names. Model loading uses the pinned
+custom code, BF16, and SDPA. Quantized training was not added without a verified
+compatibility need.
+
+SFT tokenizes the complete checkpoint template and requires an exact prompt token
+prefix. It masks that prefix with -100 and rejects overlength examples. The
+generation prompt already opens `<think>`; there is no duplicate tag or empty
+thinking prefill. Warmup filters atomic/high-match examples; full SFT continues
+the warmup adapter. GRPO merges and saves SFT first, then trains a new adapter on
+that saved base. With nonzero KL, disabling the new adapter exposes the SFT policy.
+Retain the merged base with the RL adapter when transferring artifacts.
+
+Training uses TRL, saves native trainer checkpoints and final adapter/tokenizer
+artifacts, and exposes resume. GPU updates and checkpoint reloads remain
+unverified until the first Vast.ai run. See [usage](usage.md),
+[training I/O](training-io.md), and [verification evidence](verification.md).

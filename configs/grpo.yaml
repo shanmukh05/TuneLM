@@ -1,0 +1,28 @@
+schema_version: 2
+stage: grpo
+train_file: datasets/rl/train.jsonl
+val_file: datasets/rl/val.jsonl
+output_dir: checkpoints/lfm3-grpo
+results_dir: results/lfm3-grpo
+memory_dir: datasets/memory
+sft_checkpoint: checkpoints/lfm3-sft
+merged_sft: checkpoints/lfm3-sft-merged
+training:
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 4
+  generation_batch_size: 4
+  num_generations: 4
+  max_completion_length: 1536
+  learning_rate: 5.0e-06
+  temperature: 0.8
+  beta: 0.02
+  bf16: true
+  gradient_checkpointing: true
+  mask_truncated_completions: true
+  use_vllm: false
+  save_steps: 25
+  logging_steps: 1
+  save_total_limit: 2
+  report_to: none
+  seed: 42

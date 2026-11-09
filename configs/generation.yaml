@@ -1,0 +1,33 @@
+# Set each model to its provider model ID, or leave null and set model_env.
+# Fractions apply to accepted samples and must sum to 1.0.
+schema_version: 2
+run_id: grounded-pilot-001
+seeds_file: datasets/seeds/compositions.jsonl
+stems_file: datasets/stems/verified.jsonl
+memory_dir: datasets/memory
+dataset_dir: datasets
+count: 200
+seed: 42
+pathway: both
+context_tokens: 550
+prompt_config: configs/prompting.yaml
+max_candidates_per_sample: 5
+models:
+- id: openai-teacher
+  provider: openai
+  model: null
+  model_env: OPENAI_TEACHER_MODEL
+  fraction: 0.4
+  max_tokens: 4096
+- id: gemini-teacher
+  provider: gemini
+  model: null
+  model_env: GEMINI_TEACHER_MODEL
+  fraction: 0.3
+  max_tokens: 4096
+- id: claude-teacher
+  provider: anthropic
+  model: null
+  model_env: CLAUDE_TEACHER_MODEL
+  fraction: 0.3
+  max_tokens: 4096

@@ -1,0 +1,39 @@
+# Add up to 12 diverse requests to the previous inspection pilot.
+# Run from the repository root; generate automatically loads .env.local.
+schema_version: 2
+run_id: gemini-sample-002
+append_from_run: gemini-sample-001
+prompt_config: configs/prompting.yaml
+seeds_file: datasets/seeds/compositions.jsonl
+stems_file: datasets/stems/verified.jsonl
+memory_dir: datasets/memory-pilot
+dataset_dir: datasets/pilot-gemini
+count: 12
+seed: 43
+pathway: recombine
+context_tokens: 550
+# Fixed bank: failures produce a visible shortfall instead of buying more candidates.
+max_candidates_per_sample: 1
+max_attempts: 2
+task_counts:
+  atomic: 3
+  stack: 3
+  arrange: 3
+  cocreate: 3
+# One high/partial/empty retrieval attempt per task type. Actual regime is recorded.
+balanced_contexts: true
+models:
+  - id: gemini-argon
+    provider: gemini
+    model: gemini-4-argon
+    key_env: GEMINI_API_KEY
+    fraction: 1.0
+    max_tokens: 8192
+    thinking_level: low
+    http_retries: 0
+# Up to 24 teacher attempts in an uninterrupted run. An interrupted in-flight
+# request may be billed again on resume. This is not a hard dollar spending cap.
+# SFT answers and answer-free GRPO tasks are both exported as JSONL. This tiny
+# train-only pilot is for inspection, not training or held-out evaluation.
+# Same CLI command, new resumable batch. Old journals remain untouched; SFT/RL
+# exports contain the previous accepted rows followed by this batch's new rows.

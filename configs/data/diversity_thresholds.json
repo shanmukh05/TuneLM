@@ -1,6 +1,0 @@
-{
-  "min_compose_prompt_patterns": 100,
-  "min_edit_instructions": 35,
-  "min_repair_corruptions": 14,
-  "min_repair_prompt_patterns": 15
-}
