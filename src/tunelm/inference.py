@@ -58,24 +58,29 @@ def load_checkpoint(spec: ModelSpec, checkpoint: str | None = None):
 
 def make_task(
     prompt: str,
-    memory: Memory,
+    memory: Memory | None,
     tokenizer,
     *,
     plan: Plan | None = None,
-    budget: int = 550,
+    budget: int = 6400,
     split: str = "benchmark",
 ) -> Task:
     plan = plan or make_plan(prompt)
-    retrieved = memory.retrieve(plan)
+    retrieved = (
+        memory.retrieve(plan)
+        if memory
+        else {"matches": [], "missing_roles": [], "version": "api-guide"}
+    )
     packed = pack_context(plan, retrieved, tokenizer, budget)
     return Task(
-        id=content_hash([prompt, plan.model_dump(), memory.version])[:24],
+        id=content_hash([prompt, plan.model_dump(), retrieved["version"]])[:24],
         prompt=prompt,
         plan=plan,
         context=packed["context"],
         source_families=[],
         split=split,
-        memory_version=memory.version,
+        memory_version=retrieved["version"],
+        retrieval_regime="partial" if retrieved["matches"] else "empty",
         retrieved_ids=[m["stem"]["id"] for m in retrieved["matches"]],
     )
 

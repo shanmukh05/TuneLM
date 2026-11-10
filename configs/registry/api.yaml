@@ -5,60 +5,126 @@ methods:
   setcpm:
     signature: 'setcpm(BPM/4): 4 beats per cycle'
     category: tempo
+    meaning: Sets cycles per minute; with four beats per cycle, BPM/4 sets tempo.
+    musical_use: Choose pace for the listener and groove.
+    pitfall: A cycle is not a beat or a fixed number of seconds.
   s:
-    signature: 's(pattern).bank(''RolandTR909''): validated drum tokens bd sd hh cp'
+    signature: '.s(sound): choose a playable sample, General MIDI instrument, or synth; .bank(name)
+      selects a drum bank'
     category: sound
+    meaning: Chooses a drum sample, pitched instrument or synthesized timbre.
+    musical_use: Orchestrate parts with contrasting attacks and registers.
+    pitfall: Sample names must exist in the runtime; referenced sounds are not compulsory.
   n:
     signature: n(degrees).scale('C3:minor').s('sawtooth')
     category: pitch
+    meaning: Sets scale degrees for pitched patterns or sample indices for sample players.
+    musical_use: Build related melodic shapes or vary sample articulation.
+    pitfall: Its meaning depends on scale/sample context; it is not an alias for note().
   scale:
     signature: '.scale(''C3:minor''): include register; scale degrees from n()'
     category: pitch
+    meaning: Maps scale-degree patterns to pitches in a root, octave and mode.
+    musical_use: Explore a tonal palette and transposition.
+    pitfall: It does not invent a melody or make unrelated layers harmonically coherent.
   note:
     signature: 'note(''c3 e3 g3'').s(''triangle''): absolute note names'
     category: pitch
+    meaning: Sets absolute pitches, as note names or MIDI numbers.
+    musical_use: Write a melody, bass line or chord voicing.
+    pitfall: Octave/register changes orchestration and perceived role.
   stack:
     signature: 'stack(voice1, voice2, ...): parallel voices'
     category: arrangement
+    meaning: Plays several patterns simultaneously.
+    musical_use: Combine interacting musical parts with space and balance.
+    pitfall: Stacking more parts does not by itself create a song or development.
   arrange:
     signature: 'arrange([4, intro], [8, main], [4, outro]): cycle durations'
     category: arrangement
+    meaning: Plays patterns in sequential sections with durations measured in cycles.
+    musical_use: Use intros, contrasting sections, returns and endings when appropriate.
+    pitfall: Section lengths are creative choices; no fixed 4/8-cycle template is required.
   slow:
     signature: '.slow(factor): stretch cycle duration'
     category: rhythm
+    meaning: Stretches a pattern over more cycles without transposing note pitches.
+    musical_use: Create longer phrases, space and slower harmonic movement.
+    pitfall: Changing density is different from changing the master tempo.
   fast:
     signature: '.fast(factor): compress cycle duration'
     category: rhythm
+    meaning: Compresses a pattern into fewer cycles.
+    musical_use: Develop a motif or create busier rhythmic activity.
+    pitfall: Faster repetition does not automatically improve groove.
   euclid:
     signature: '.euclid(pulses, steps): distribute pulses evenly'
     category: rhythm
+    meaning: Distributes a number of rhythmic pulses over a number of steps.
+    musical_use: Explore uneven recurring rhythms and interlocking percussion.
+    pitfall: Listen for the chosen meter and accents rather than treating it as a genre label.
   jux:
     signature: '.jux(rev): stereo juxtaposition'
     category: stereo
+    meaning: Places an original pattern on one stereo side and a transformed version on the other.
+    musical_use: Create stereo dialogue or contrast.
+    pitfall: Check that the two versions remain musically coherent.
   'off':
     signature: '.off(1/8, x => x.add(7)): shifted superposition'
     category: rhythm
+    meaning: Superimposes a time-shifted transformed copy of a pattern.
+    musical_use: Create answering gestures, echoes or interlocking phrases.
+    pitfall: The added copy can crowd the original phrase.
   lpf:
     signature: '.lpf(cutoff_hz): e.g. sine.range(200,2400).slow(8)'
     category: filter
+    meaning: Attenuates frequencies above a cutoff.
+    musical_use: Soften brightness or create evolving timbral motion.
+    pitfall: A filter cannot turn any oscillator into a realistic acoustic recording.
   hpf:
     signature: '.hpf(cutoff_hz): e.g. 200 for pads above bass'
     category: filter
+    meaning: Attenuates frequencies below a cutoff.
+    musical_use: Make room for low-register instruments.
+    pitfall: Too much filtering can remove the body of a part.
   lpq:
     signature: '.lpq(resonance): conservative Q, e.g. 2'
     category: filter
+    meaning: Controls low-pass resonance near the cutoff.
+    musical_use: Add resonant character and emphasize motion.
+    pitfall: High resonance can create sharp peaks.
   gain:
     signature: '.gain(level): start below 1 per voice; symbolic value is not loudness'
     category: mix
+    meaning: Scales a part's amplitude.
+    musical_use: Balance foreground and supporting parts.
+    pitfall: Event gain is not measured perceived loudness or a guarantee against clipping.
   pan:
     signature: '.pan(sine.slow(4)): stereo position 0..1'
     category: stereo
+    meaning: Positions a signal across stereo, from 0 on the left to 1 on the right.
+    musical_use: Give parts space or subtle movement.
+    pitfall: Stereo motion should serve the music.
   room:
     signature: '.room(amount): reverb send'
     category: space
+    meaning: Adds reverberant space.
+    musical_use: Place parts in a shared space or emphasize a phrase.
+    pitfall: Reverb can obscure rhythmic detail and does not add composition structure.
   decay:
     signature: '.decay(seconds): e.g. 0.2'
     category: envelope
+    meaning: Sets how quickly an envelope falls after its initial attack.
+    musical_use: Shape percussive, plucked or ringing articulation.
+    pitfall: The sample and other envelope stages also affect the result.
   sustain:
     signature: '.sustain(level): e.g. 0 for plucked bass'
     category: envelope
+    meaning: Sets the envelope level held after decay.
+    musical_use: Contrast held tones with short articulations.
+    pitfall: A sustained level does not specify pitch or note duration by itself.
+composition_notes: A melody needs phrasing, pauses and recognizable motives. Harmony can support or
+  contrast with it; voice-leading and register help parts fit together. Groove comes from accents,
+  rests and interaction, not density alone. Develop ideas through repetition, contrast, variation
+  and returns. Give layers distinct jobs and leave space. These are possibilities, not mandatory formulas.
+  Symbolic execution cannot establish mood, realism or musical quality; listen and review.

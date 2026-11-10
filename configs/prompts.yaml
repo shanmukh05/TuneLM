@@ -1,0 +1,172 @@
+# Full input-bank run, including the authoring palette.
+# In palette.schedule, a repeated style is a weight. brief() walks that list in
+# order, so musical is requested more often than vague or technical.
+# A smaller authoring run is a smaller counts block in this file.
+schema_version: 2
+progress: true
+save_every: 10
+run_id: input-bank-14
+output_dir: datasets/prompts/generated
+counts:
+  sft:
+    train: 2000
+    val: 200
+    benchmark: 100
+  rl:
+    train: 0
+    val: 0
+    benchmark: 0
+categories:
+- stack
+- arrange
+- stack
+- atomic
+- stack
+- cocreate
+max_attempts: 3
+avoid_sample: 1000
+
+models:
+- id: openrouter-composer-thinkingmachines
+  provider: openrouter
+  model: thinkingmachines/inkling-small
+  fraction: 0.1
+  max_tokens: 16384
+- id: openrouter-composer-glm
+  provider: openrouter
+  model: z-ai/glm-5.3-flashx
+  fraction: 1.0
+  max_tokens: 16384
+- id: openrouter-composer-qwen
+  provider: openrouter
+  model: qwen/qwen3.8-flash
+  fraction: 1.0
+  max_tokens: 16384
+- id: gemini-author
+  provider: gemini
+  model: gemini-3.1-flash-lite
+  fraction: 1.0
+  max_tokens: 16384
+  thinking_level: low
+- id: deepseek-composer
+  provider: deepseek
+  model: deepseek-flash
+  fraction: 1.0
+  max_tokens: 16384
+- id: openrouter-composer-minimax
+  provider: openrouter
+  model: minimax/minimax-m3.1-flash
+  fraction: 0.5
+  max_tokens: 16384
+- id: openrouter-composer-mistral
+  provider: openrouter
+  model: mistralai/mistral-large-4-0
+  fraction: 0.5
+  max_tokens: 16384
+- id: openai-composer
+  provider: openai
+  model: gpt-5.6-luna
+  fraction: 1.0
+  max_tokens: 16384
+
+palette:
+  schema_version: 2
+  schedule:
+  - musical
+  - genre
+  - activity
+  - blend
+  - groove
+  - vague
+  - musical
+  - dialogue
+  - reference
+  - activity
+  - musical
+  - restraint
+  - vague
+  - blend
+  - genre
+  - solo
+  - contrast
+  - musical
+  - dislike
+  - vague
+  - mood
+  - dance
+  - technical
+  - musical
+  writing_guidance: Write the words one person would actually say to a musician. One voice, one
+    occasion, and stop when the ask is clear. A few words is a finished request when the style is short.
+    Otherwise use one to four sentences. Do not add a backstory, a mood paragraph, or extra adjectives
+    to make it sound complete.
+    "I'm" is fine. So is a question, a bare instruction, a fragment, or a line that starts on the music.
+    Pick the shape this person would use. Do not make a personal diary sentence the usual shape.
+    Include one concrete preference they would bother to say. That can be an instrument, a part they
+    want to hear, what the music is for, a tune they could hum, or something they do not want. Leave
+    tempo, key, and production unsaid unless this style asks for them. When the style is a mood, name
+    one emotion in plain speech or bunch of emotions that are happening at the same time or one after the other. Sharp, playful, tense, or angry are as natural as warm or calm.
+    Sound spoken. No playlist copy, no "sonic journey," no neon-city scene, and no artist imitation.
+    Invent the occasion yourself. There is no scene list. Do not make everything lo-fi, ambient, a
+    loop, or background music. For a full piece, ask for parts that answer each other rather than a
+    stack of unrelated exercises. Keep it instrumental. No promised singing, lyrics, or an acoustic
+    recording. Imagine different types of people, age groups, genders, backgrounds, cultures, countries, languages, religions, philosophies, ideas, needs, and wants and write the request from their perspective.
+    Follow the opening and the focus in this brief. They belong to this request. Do not replace them with a stock funk groove, afrobeat rhythm, or panic scene. Use ASD-STE100 style for the request and write like a normal person would.
+  openings:
+  - Start with a question.
+  - Start with a bare instruction and no "I".
+  - Use a fragment of only a few words.
+  - Start on the music itself, not the person.
+  - First person is fine this time, but get to the music in the first sentence.
+  - Start with what the listener does not want.
+  focuses:
+  - One instrument and nothing else.
+  - Two parts that answer each other.
+  - A change from one feeling to a different one.
+  - Rhythm only, with almost no melody.
+  - A melody someone could hum.
+  - Music that has to be useful for a real task.
+  - Something harsh, sharp, or irritating.
+  - Something playful or funny.
+  - A lot of silence and very few notes.
+  - Three specific instruments that have to fit together.
+  styles:
+    vague: A few words, sometimes only two or three. One feeling or one ask, with no instruments, theory,
+      or production details. Do not make every other request this short.
+    mood: Ask for one emotion in plain language. Vary it. Joy, tenderness, tension, play, grief, calm,
+      unease, anger, warmth, and excitement. Do not default to cozy, nostalgic, or sad. A few words is
+      enough. A listener can mention an instrument or something they dislike, but should not sound like
+      an adjective-filled playlist.
+    genre: Ask for a recognizable kind of music with a few personal preferences. Named instruments, a
+      hook, and contrasting parts are welcome. Avoid code settings.
+    activity: A real person needs music for a video, gathering, rehearsal, workout, or other practical
+      use. Include what should happen musically and why it matters to them.
+    blend: Ask for two musical influences together, explaining which qualities to take from each. Include
+      concrete instruments, groove, melody, or structure when useful.
+    reference: Describe music for a scene or event in everyday terms, with concrete musical preferences.
+      Use familiar listening experiences; avoid invented neon-city cliches and named-song copying. It
+      should sound like a request, not promotional writing.
+    musical: An ordinary listener or band member asks for a song, tune, instrumental, or backing track.
+      They can name several instruments, describe a melody and groove, ask for an intro/chorus/ending,
+      or give three or four connected preferences. Usually one to four sentences. A short direct ask is
+      also fine. Do not reduce the request to one generic mood line or a list of code parameters.
+      Musical complexity is welcome.
+    technical: An occasional live-coder or producer request with a few concrete requirements. Exact BPM,
+      key, or supported Strudel methods are allowed when appropriate.
+    groove: The request is about rhythm and how parts lock. Talk about pocket, swing, push, rests, or
+      a pattern someone could nod to. A couple of instruments is enough. Do not pin a tempo, key, or any
+      Strudel call, and do not turn it into a genre essay or a scene description.
+    dialogue: 'Ask for parts that answer each other: a phrase and a reply, a bass that reacts, or a melody
+      that leaves room for another line. The listener cares about that conversation. Leave tempo and key
+      open, and do not fill the request with unrelated layers.'
+    restraint: Ask for room. One or two ideas, pauses, and parts that stay out of the way. The listener
+      wants the piece to develop without filling every moment. Do not expand it into a full band, a BPM,
+      or a key.
+    solo: Ask for one instrument and nothing else. Say how it should move. Do not add drums, chords, or
+      a second voice, and do not name a tempo or a key.
+    contrast: Ask for a change that can be heard. Loud then quiet, busy then empty, or one part that
+      disagrees with another. Say what each side does. Leave tempo and key open.
+    dislike: The listener knows what they do not want to hear and says that first. Then say the small
+      thing they do want. Do not turn the dislike into a list of studio effects.
+    dance: Music for a body. Name the movement, such as a step, a sway, a jump, or a hold, and what the
+      rhythm should do. Do not describe a nightclub scene or pin a tempo.

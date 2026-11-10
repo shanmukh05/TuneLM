@@ -25,8 +25,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("sources")
     p.add_argument("--cycles", type=int, default=32)
     p = commands.add_parser("build-memory")
-    p.add_argument("--stems", default="datasets/stems/verified.jsonl")
-    p.add_argument("--config", default="configs/memory.yaml")
+    p.add_argument("--stems", default="datasets/sources/verified.jsonl")
+    p.add_argument("--config", default="configs/registry/memory.yaml")
     p.add_argument("--output", default="datasets/memory")
     p.add_argument(
         "--lexical", action="store_true", help="Explicit offline baseline, not semantic embeddings"
@@ -40,11 +40,18 @@ def parser() -> argparse.ArgumentParser:
         "--env-file", default=".env.local", help="Literal KEY=value file; shell env wins"
     )
     p.add_argument("--model-config", default="configs/model.yaml")
-    p.add_argument("--provider", choices=["openai", "gemini", "anthropic", "claude"])
+    p.add_argument(
+        "--provider", choices=["openai", "gemini", "anthropic", "claude", "deepseek", "openrouter"]
+    )
     p.add_argument("--teacher-model")
     p.add_argument("--run-id")
     p.add_argument("--dataset-dir")
     p.add_argument("--count", type=int)
+    p.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Freeze inputs and export RL tasks; no answer calls",
+    )
     p.add_argument(
         "--dry-run",
         action="store_true",
@@ -55,6 +62,16 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use a cached tokenizer; teacher calls still require network",
     )
+    p = commands.add_parser("create-prompts")
+    p.add_argument("--config", default="configs/prompts.yaml")
+    p.add_argument("--env-file", default=".env.local")
+    p.add_argument("--dry-run", action="store_true")
+    p = commands.add_parser("view")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--env-file", default=".env.local")
+    p.add_argument("--model-config", default="configs/model.yaml")
+    p.add_argument("--memory", default="datasets/memory")
+    p.add_argument("--offline", action="store_true")
     for name in ["train-sft", "train-grpo"]:
         p = commands.add_parser(name)
         p.add_argument("--config", required=True)
@@ -112,6 +129,8 @@ def _memory(args):
 
 
 def _task(args):
+    from pathlib import Path
+
     from tunelm.inference import make_task
     from tunelm.memory import Memory
     from tunelm.schemas import Plan
@@ -120,7 +139,12 @@ def _task(args):
     spec = ModelSpec.model_validate(load_config(args.model_config))
     tokenizer = load_tokenizer(spec, offline=args.offline)
     explicit = Plan.model_validate(load_config(args.plan)) if args.plan else None
-    task = make_task(args.prompt, Memory(args.memory), tokenizer, plan=explicit)
+    from tunelm.io import project_path
+
+    memory = (
+        Memory(args.memory) if project_path(Path(args.memory) / "metadata.json").exists() else None
+    )
+    task = make_task(args.prompt, memory, tokenizer, plan=explicit)
     return task, spec, tokenizer
 
 
@@ -142,6 +166,7 @@ def _generate(args):
     return generate(
         config,
         load_tokenizer(spec, offline=args.offline),
+        prepare_only=args.prepare_only,
     )
 
 
@@ -164,6 +189,14 @@ def generation_config(args):
             }
         ]
     return GenerationConfig.model_validate(raw)
+
+
+def _create_prompts(args):
+    from tunelm.prompt_generation import generate_prompts, load_prompt_generation_config, prompt_preview
+
+    load_env_file(args.env_file)
+    config = load_prompt_generation_config(args.config)
+    return prompt_preview(config) if args.dry_run else generate_prompts(config)
 
 
 def _train(args):
@@ -211,6 +244,12 @@ def _evaluate(args):
     return evaluate(args.tasks, args.predictions, args.output)
 
 
+def _view(args):
+    from tunelm.viewer import serve_viewer
+
+    return serve_viewer(args.port, args.env_file, args.model_config, args.memory, args.offline)
+
+
 def _ingest(args):
     from tunelm.corpus import ingest
 
@@ -226,11 +265,13 @@ def main(argv: list[str] | None = None) -> None:
         "build-memory": _memory,
         "plan": _plan,
         "generate": _generate,
+        "create-prompts": _create_prompts,
         "train-sft": _train,
         "train-grpo": _train,
         "infer": _infer,
         "predict": _predict,
         "evaluate": _evaluate,
+        "view": _view,
     }
     try:
         result = handlers[args.command](args)

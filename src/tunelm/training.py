@@ -116,13 +116,16 @@ def _rows(config: TrainConfig):
             r
             for r in train
             if r.plan.category == "atomic"
-            or (r.plan.category == "stack" and r.retrieval_regime == "high")
+            or (r.plan.category == "stack" and len(r.plan.voices) <= 3)
         ]
     if not train or any(r.split != "train" for r in train) or any(r.split != "val" for r in val):
         raise ValueError("Training/validation rows are empty or assigned to the wrong split")
-    train_families = {f for r in train for f in r.source_families}
-    if train_families & {f for r in val for f in r.source_families}:
+    train_families = {f for r in train if not r.prompt_id for f in r.source_families}
+    if train_families & {f for r in val if not r.prompt_id for f in r.source_families}:
         raise ValueError("Source-family leakage between training and validation")
+    train_prompts = {" ".join(r.prompt.casefold().split()) for r in train}
+    if train_prompts & {" ".join(r.prompt.casefold().split()) for r in val}:
+        raise ValueError("Prompt leakage between training and validation")
     if len({r.id for r in train + val}) != len(train + val):
         raise ValueError("Duplicate training/validation IDs")
     return train, val
@@ -155,11 +158,7 @@ def preflight(config: TrainConfig, *, tokenize: bool = False, offline: bool = Fa
         _validate_adapter(config.adapter, config.model)
     output_path(config.output_dir + "/run.json")
     output_path(config.results_dir + "/run.json")
-    from tunelm.memory import Memory
-
-    memory = Memory(config.memory_dir)
-    if any(row.memory_version != memory.version for row in train + val):
-        raise ValueError("Training data does not match the frozen memory snapshot")
+    memory_version = _reference_snapshot(config, train + val)
     if config.stage == "grpo":
         _validate_handoff(config)
     report = {
@@ -168,7 +167,7 @@ def preflight(config: TrainConfig, *, tokenize: bool = False, offline: bool = Fa
         "val_rows": len(val),
         "model": config.model.model_dump(),
         "weights_loaded": False,
-        "memory_version": memory.version,
+        "memory_version": memory_version,
         "data_hash": content_hash([r.model_dump() for r in train + val]),
         "libraries": {m: version(m) for m in ["transformers", "trl", "peft", "datasets"]},
     }
@@ -178,6 +177,18 @@ def preflight(config: TrainConfig, *, tokenize: bool = False, offline: bool = Fa
         _check_lengths(config, train + val, tokenizer)
         report["tokenizer_checked"] = len(train + val)
     return report
+
+
+def _reference_snapshot(config, rows):
+    """Prompt-first rows freeze full context; only legacy corpus rows need an index."""
+    legacy = [row for row in rows if not row.prompt_id]
+    if legacy:
+        from tunelm.memory import Memory
+
+        memory = Memory(config.memory_dir)
+        if any(row.memory_version != memory.version for row in legacy):
+            raise ValueError("Training data does not match the frozen memory snapshot")
+    return content_hash(sorted({row.memory_version for row in rows}))
 
 
 def _validate_adapter(path: str, spec: ModelSpec) -> None:

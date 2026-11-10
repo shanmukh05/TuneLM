@@ -1,7 +1,7 @@
 schema_version: 2
 stage: grpo
-train_file: datasets/rl/train.jsonl
-val_file: datasets/rl/val.jsonl
+train_file: datasets/creative/rl/train.jsonl
+val_file: datasets/creative/rl/val.jsonl
 output_dir: checkpoints/lfm3-grpo
 results_dir: results/lfm3-grpo
 memory_dir: datasets/memory

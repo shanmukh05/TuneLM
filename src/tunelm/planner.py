@@ -15,7 +15,7 @@ ROLE_WORDS = {
     "drums_core": ("drum", "kick", "snare", "beat"),
     "perc_tops": ("hat", "shaker", "percussion", "tops"),
     "bass": ("bass", "bassline", "low end", "low-end"),
-    "chords_pad": ("chord", "pad", "harmony"),
+    "chords_pad": ("chord", "pad", "harmony", "piano", "keyboard", "strings", "acoustic guitar"),
     "arp_lead": ("arp", "lead", "melody", "hook"),
     "fx_texture": ("texture", "noise", "sweep", "drone"),
 }
@@ -65,6 +65,7 @@ def make_plan(prompt: str) -> Plan:
         explicit=explicit,
         short_loop=short,
         cycles=32 if category == "arrange" else 16,
+        intent_only=True,
     )
 
 
@@ -72,12 +73,62 @@ def _word(text: str, word: str) -> bool:
     return re.search(rf"\b{re.escape(word)}(?:s)?\b", text) is not None
 
 
-def _stem_block(match: dict) -> str:
+def explain_stem(stem: dict, registry: dict) -> str:
+    """Explain measured pattern behavior without inventing a listening or genre assessment."""
+    telemetry = stem["telemetry"]
+    effects = [
+        registry[m].get("meaning", registry[m]["signature"])
+        for m in stem["methods"]
+        if m in registry
+    ]
+    return (
+        f"Source description: {stem['description']}. Suggested role: {stem['role']} "
+        f"(classifier confidence {stem['role_confidence']}). "
+        f"Measured sources: {', '.join(telemetry['sound_sources'])}; "
+        f"{telemetry['events_per_cycle']:.2f} events/cycle; MIDI pitch range "
+        f"{telemetry['pitch_range']}. Operations: {'; '.join(effects)}. "
+        "This is a symbolic explanation, not a listening review. You may change the "
+        "notes, rhythm, timbre, register, and structure or ignore this example entirely."
+    )
+
+
+def _stem_block(match: dict, registry: dict) -> str:
     stem = match["stem"]
     code = stem["setup"] + "\n" + stem["code"]
     if "]]>" in code:
         raise ValueError("Stem contains an unsupported CDATA terminator")
-    return f'<stem role="{match["role"]}" id="{stem["id"]}"><![CDATA[{code.strip()}]]></stem>'
+    explanation = escape(explain_stem(stem, registry))
+    return (
+        f'<example optional="true" role="{match["role"]}" id="{stem["id"]}">'
+        f"<meaning>{explanation}</meaning><code><![CDATA[{code.strip()}]]></code></example>"
+    )
+
+
+def _sound_reference() -> str:
+    """Describe unbanked and GM names. Banked drums reuse that role through bank()."""
+    sounds = load_config("configs/registry/sounds.yaml")["sounds"]
+    shown = [name for name in sounds if name.startswith("gm_") or "_" not in name]
+    # One shared caveat. Repeating each sound's pitfall is the same sentence hundreds of times.
+    policy = (
+        "Playable timbres, not an ingredient list. "
+        "A banked drum is Machine_role of the same role, selected with bank(). "
+        "On drums, n() picks another recording and wraps; it does not set pitch. "
+        "gm_* names are General MIDI soundfont samples; set pitch with note() or n().scale()."
+    )
+    parts = [f'<sounds optional="true"><policy>{escape(policy)}</policy>']
+    for name in shown:
+        text = sounds[name]["meaning"]
+        if name.startswith("gm_"):
+            group = sounds[name]["musical_use"].split(". Set pitch")[0]
+            text = f"{text} {group}."
+        parts.append(f'<sound name="{escape(name)}">{escape(text)}</sound>')
+    parts.append("</sounds>")
+    return "".join(parts)
+
+
+def _api_reference(name: str, item: dict) -> str:
+    explanation = " ".join(item.get(field, "") for field in ["meaning", "musical_use", "pitfall"])
+    return f'<api name="{name}">{escape(item["signature"] + ". " + explanation)}</api>'
 
 
 def _mix_notes(matches: list[dict]) -> list[tuple[str, str]]:
@@ -96,26 +147,25 @@ def _mix_notes(matches: list[dict]) -> list[tuple[str, str]]:
     ]
 
 
-def pack_context(plan: Plan, retrieval: dict, tokenizer, budget: int = 550) -> dict:
+def pack_context(plan: Plan, retrieval: dict, tokenizer, budget: int = 6400) -> dict:
     """Keep complete XML items, enforcing the actual tokenizer's token budget."""
-    registry = load_config("configs/registry/api.yaml")["methods"]
-    opening = f'<memory_context><defaults cpm="{plan.cpm}" key="{escape(plan.key or "none")}"/>'
+    guide = load_config("configs/registry/api.yaml")
+    registry = guide["methods"]
+    opening = '<memory_context optional="true"><policy>Reference material only. Compose freely; '
+    opening += "examples, instruments, keys, and techniques are not requirements.</policy>"
     items, omitted = [], []
-    techniques = {"setcpm", "stack", "s", "gain"}
+    techniques = {"setcpm", "stack", "s", "gain", "note", "arrange", "scale"}
     for voice in plan.voices:
         techniques.update(voice.techniques)
     for match in retrieval["matches"]:
         techniques.update(match["stem"]["methods"])
-    references = [
-        f"<api>{escape(registry[m]['signature'])}</api>"
-        for m in sorted(techniques)
-        if m in registry
-    ]
-    candidates = [("api", item) for item in references]
+    references = [_api_reference(m, registry[m]) for m in sorted(techniques) if m in registry]
+    candidates = [("concepts", "<music>" + escape(guide.get("composition_notes", "")) + "</music>")]
+    candidates.extend(("api", item) for item in references)
+    candidates.append(("sounds", _sound_reference()))
     candidates.extend(_mix_notes(retrieval["matches"]))
-    candidates.extend((match["stem"]["id"], _stem_block(match)) for match in retrieval["matches"])
     candidates.extend(
-        ("missing", f'<missing role="{role}"/>') for role in retrieval["missing_roles"]
+        (match["stem"]["id"], _stem_block(match, registry)) for match in retrieval["matches"]
     )
     for name, item in candidates:
         candidate = opening + "".join(items + [item]) + "</memory_context>"

@@ -1,32 +1,15 @@
 # TuneLM implementation
 
 Implemented 2026-11-06 for `LiquidAI/LFM3-1.7B-Base`. Both supervised fine-tuning
-and GRPO reinforcement learning are implemented. GPU training, teacher calls,
-model inference, and Vast.ai jobs remain unrun at the user's request.
+and GRPO reinforcement learning are implemented. Earlier teacher pilots ran; the prompt-first redesign was checked locally without
+new paid calls. GPU training, model inference, and Vast.ai jobs remain unrun.
 
 ## Flow and ownership
 
-```mermaid
-flowchart LR
-  A[Pinned licensed source files] --> SC[Collection script]
-  SC --> S
-  S[Licensed source JSONL] --> I[Verify + AST decomposition]
-  I --> C[Canonical seed/stem JSONL]
-  C --> M[Training-only memory index]
-  P[Prompt or explicit plan] --> R[Filter/rank + bounded context]
-  M --> R
-  C --> G[Grounded teacher generation]
-  R --> G
-  G --> V[Format + execution + musical gates]
-  V --> D[SFT examples + answer-free RL tasks]
-  D --> W[SFT warmup]
-  W --> F[Full-mixture SFT]
-  F --> B[Saved merged SFT base]
-  B --> RL[Fresh GRPO adapter + verifier rewards]
-  RL --> E[Frozen benchmark + listening review]
-  R --> N[Checkpoint inference]
-  N --> V
-```
+`prompts.yaml` → independent SFT/RL request authoring → reviewed JSONL inputs.
+SFT requests → original composition + optional references → executable answers.
+RL requests → frozen answer-free tasks. Both feed the existing SFT/GRPO stages.
+Source collection and memory are optional reference-library branches.
 
 | Module | Owns |
 | --- | --- |
@@ -37,7 +20,8 @@ flowchart LR
 | `corpus.py` | Source/license manifests, stable family splits, seed and stem verification |
 | `scripts/collect_seeds.py`, `scripts/extract_seed_objects.mjs` | Source allowlist, pinned downloads/cache, literal extraction, provenance, deduplication, optional ingestion |
 | `memory.py`, `planner.py` | SQLite/NumPy indexes, embeddings, metadata filtering, ranking, typed plans, bounded XML context |
-| `synthesis.py`, `generation_state.py`, `responses.py`, `teachers.py` | Grounded generation, four personas, retrieval regimes, retries, shared summary/code contract, native provider adapters |
+| `prompt_generation.py`, `prompting.py` | Independent resumable SFT/RL request banks, author quotas, styles, reviewable JSONL |
+| `synthesis.py`, `generation_state.py`, `responses.py`, `teachers.py` | Original composition for fixed requests, optional references, independent RL exports, retries, native structured provider adapters |
 | `training.py`, `rewards.py` | Completion-masked SFT, SFT-to-GRPO handoff, reward components, checkpoint/resume, preflight |
 | `inference.py`, `cli.py` | Explicit commands, prediction journals, offline scoring, missing/extra-ID reporting |
 
@@ -83,14 +67,15 @@ cycle boundary count once, MIDI pitch 0 is retained, and numeric controls are
 checked before JSON serialization. Sound and bank controls are combined for
 catalog validation; drum-machine/default Uzu drum-kit snapshots and a synth allowlist
 are checked in. Symbolic validity does not prove samples were downloaded or audio
-played. General MIDI/custom sounds require explicit catalog additions.
+played. All 125 active GM instrument names from the pinned official soundfont package are cataloged; custom runtime additions still need verification.
 
 Telemetry separates note/rhythm fingerprints from control automation. Evolution
 is evaluated in 8-cycle windows; the total queried window is stored. Rewards
 hard-gate malformed responses and failed execution, then average applicable
 instruction, scale, register/sound role, evolution, and gain proxies. Atomic or
-explicit static loops omit evolution rewards. Accepted teacher rows must satisfy
-explicit constraints and task-specific quality gates.
+explicit static loops omit evolution rewards. Prompt-first rows enforce execution and explicit request constraints. Inferred
+key/role defaults and a fixed structural-variation threshold are not acceptance
+requirements. Symbolic proxies remain useful diagnostics, not creativity scores.
 
 Role coverage and gain checks are deliberately simple proxies. They cannot prove
 independent voice count, perceptual balance, artistic quality, or correspondence
@@ -98,7 +83,7 @@ of every natural-language claim. Review teacher examples and listen before scali
 
 ## Memory and data
 
-`configs/sources.yaml` lists reviewed source files, immutable revisions, checksums,
+`configs/registry/sources.yaml` lists reviewed source files, immutable revisions, checksums,
 and license evidence across GitHub and Codeberg. Downloads are temporary; parsed
 JSONL and notices are retained. Literal objects, exported templates, JSON examples,
 Markdown fences, and independent programs are extracted without executing modules.
@@ -115,35 +100,32 @@ are rebuildable indexes. Default semantic embeddings use a pinned MiniLM model;
 enter memory. Hard role/density filtering precedes semantic/method/evolution
 ranking at 0.65/0.25/0.10, with stable ID tie breaking. Missing roles are explicit.
 
-Basic prompt rules recognize common tempo, scale, voice, and arrangement cues.
-Use explicit Plan JSON for precise requirements or co-creation. This is not a
-general natural-language music planner. Context packing uses the LFM tokenizer,
-keeps whole XML/code items, and reports omissions at the 550-token budget.
+Input authoring assigns a writing style and lets the author invent the situation.
+There is no fixed scene list. Separate stage/split banks reject exact duplicate prompt text and IDs across
+SFT, RL, and evaluation. Reviewed input edits are protected from author reruns.
+Answer generation snapshots these banks and optional contexts, chooses its own
+composition plan, and never generates or rewrites the user prompt. Each input is
+assigned to one composer using exact per-model targets. Failed jobs exhaust their
+bounded correction attempts and report shortfalls rather than rewriting requests.
 
-Ingestion assigns a source-family split before extraction; explicit split
-conflicts and exact duplicate compositions fail. Descendants inherit the split,
-and recombination stays within a split. Held-out targets never enter memory.
-Near-duplicate musical families still need corpus review; exact hashes do not
-establish semantic independence.
+Reference modes are none, API-only, or optional annotated retrieval. Registry
+entries explain behavior, musical uses, and pitfalls; snippets explain measured
+sources, density, pitch register, and operation meanings. No reference tempo,
+scale, instrument mapping, source code, or section template is compulsory. The
+old back-translation/recombination factory has been removed from the active path.
+Only explicitly supplied co-creation code must be preserved. Source-family splits
+remain relevant to corpus-derived legacy targets; independent prompt inputs may
+share optional reference examples. The teacher that writes the answer receives the
+packed reference context, including API notes and sound descriptions. LFM training
+and inference receive the listener request only, plus co-creation code when the
+listener supplied it. Stored context is a record of what the teacher saw.
 
-Generation YAML lists all teacher models, providers, and accepted-sample fractions.
-Largest-remainder allocation produces exact per-model targets. Teacher calls use
-OpenAI-compatible, native Gemini, or native Anthropic Claude backends through one
-typed interface and explicit registry. SDK imports are lazy,
-provider-specific API-key defaults are used, and clients close at run completion.
-Gemini and Claude request structured JSON; all replies pass the same local schema
-and musical gates. Provider/model identities are saved with each teacher example
-and included in run fingerprints. Back-translation
-preserves verified code; recombination uses verified, transposed stems and native
-execution before teacher adaptation. High/partial/empty retrieval targets a
-40/40/20 mix; absent alternatives can increase the realized empty share. Accepted
-rows and attempts are separate, and retry history limits each model/job to three
-attempts across restarts. Frozen jobs, per-model cursors, crash-gap recovery, and
-exclusive run locks support resumption. Bounded replacement candidates fill each
-model quota; shortfalls are reported without reallocating the share. Input/model/
-tokenizer identities prevent mixing runs. See usage for the persisted state files.
-The 20/45/15/20 task mixture and 30,000 examples remain scaling targets, not claims
-about the tiny starter corpus.
+Provider adapters support separate prompt and composition response schemas across
+OpenAI, Gemini, and Claude. Input stage replies contain a request and optional
+co-creation starting code; answer replies contain a composer-chosen plan, prose
+musical thinking, and code. Requests, journals, usage, snapshots, and exact model
+identities stay local JSON/JSONL. RL banks have no teacher answer fields. Both
+stages use locks, journal recovery, and stable identities for resume.
 
 ## Required training stages
 
@@ -157,7 +139,7 @@ compatibility need.
 SFT tokenizes the complete checkpoint template and requires an exact prompt token
 prefix. It masks that prefix with -100 and rejects overlength examples. The
 generation prompt already opens `<think>`; there is no duplicate tag or empty
-thinking prefill. Warmup filters atomic/high-match examples; full SFT continues
+thinking prefill. Warmup uses atomic or small layered examples without requiring retrieval matches; full SFT continues
 the warmup adapter. GRPO merges and saves SFT first, then trains a new adapter on
 that saved base. With nonzero KL, disabling the new adapter exposes the SFT policy.
 Retain the merged base with the RL adapter when transferring artifacts.

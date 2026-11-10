@@ -6,7 +6,7 @@ Collection found 699 candidates before exact code deduplication: 679 distinct ca
 
 ## Imported scopes
 
-Counts in the extracted column precede exact deduplication. Zero accepted entries means the source remains available as candidate data with saved rejection diagnostics; it is not part of the accepted seed bank. Every file, revision, checksum, and license scope is pinned in [`configs/sources.yaml`](../configs/sources.yaml).
+Counts in the extracted column precede exact deduplication. Zero accepted entries means the source remains available as candidate data with saved rejection diagnostics; it is not part of the accepted seed bank. Every file, revision, checksum, and license scope is pinned in [`configs/registry/sources.yaml`](../configs/registry/sources.yaml).
 
 | Collection | License | Extracted | Accepted | Stems |
 | --- | --- | ---: | ---: | ---: |

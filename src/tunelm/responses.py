@@ -1,6 +1,6 @@
 """Render the shared model contract and strictly parse generated completions.
 
-Composition summaries state five concise musical choices before executable code.
+The think block is musical reasoning in prose, followed by one executable program.
 """
 
 from __future__ import annotations
@@ -10,25 +10,24 @@ import re
 from tunelm.schemas import Task
 
 SYSTEM = """You are TuneLM, an algorithmic Strudel composer.
-Use the request and memory references to create executable Strudel JavaScript.
-Return <think> with exactly five concise numbered musical decisions:
-1. Tempo, key, and structure.
-2. Rhythm and percussion.
-3. Bass and harmony.
-4. Melody, timbre, and modulation.
-5. Mixing and arrangement.
+The user message is the listener's request and nothing else. Choose the musical
+details they leave open.
+Return <think> with your musical reasoning in ordinary prose. Think out loud
+about tempo, key, rhythm, harmony, melody, and the mix as you settle them.
+Write continuous reasoning, not a numbered checklist.
 Then close </think> and return one ```strudel code block with the entire program.
 Use setcpm(BPM/4), immutable const declarations, and a final stack/arrange/pattern.
-Adapt retrieved examples to the request. Preserve supplied code when requested.
-For vague, mood, genre, or activity requests, choose fitting musical details yourself
-and state those choices in the summary. The user need not specify code or theory.
+Compose original parts. Preserve code only when the user message supplies it.
+When tempo, key, or orchestration are left open, choose them yourself and state
+those choices in the thinking. The listener need not specify code or theory.
 Use Strudel JS, never Tidal Haskell operators. No imports, network, samples(),
 browser APIs, loops, or external side effects. Use only registered sounds.
 """
 
 
 def messages(task: Task) -> list[dict[str, str]]:
-    content = task.prompt + "\n\n" + task.context
+    """LFM receives the listener request. Teacher reference context stays off this prompt."""
+    content = task.prompt
     if task.plan.original_code:
         content += "\n\nPreserve this existing voice:\n" + task.plan.original_code
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]
@@ -50,11 +49,10 @@ def parse_completion(text: str) -> tuple[str, str]:
         r"\s*<think>(.*?)</think>\s*```(?:strudel|javascript|js)\s*\n(.*?)\n```\s*", text, re.S
     )
     if not match:
-        raise ValueError("Expected a five-part <think> summary and one Strudel code block")
-    summary, code = match.groups()
-    numbers = re.findall(r"^\s*([1-5])\.\s+\S", summary, re.M)
-    if numbers != ["1", "2", "3", "4", "5"] or not code.strip():
-        raise ValueError("Summary must contain exactly stages 1–5 in order and nonempty code")
+        raise ValueError("Expected a <think> block and one Strudel code block")
+    summary, code = (part.strip() for part in match.groups())
+    if not summary or not code:
+        raise ValueError("The think block and the Strudel code must both be nonempty")
     if "```" in code or "<think>" in summary or "</think>" in code:
         raise ValueError("Nested response delimiters are forbidden")
     return summary.strip(), code.strip()

@@ -6,41 +6,42 @@ The legacy assets live under ignored `archive/` and are never pipeline outputs.
 
 ## Dataset creation in plain language
 
-We start with **working music, then turn it into teaching examples**:
+The current pipeline starts with independent listener requests, not source songs:
 
-1. Run the seed collector to download the configured source examples. With
-   `--ingest`, it checks the code and extracts parts such as drums, bass, and
-   chords. You can also supply your own source JSONL to `tunelm ingest`.
-2. Run `build-memory` to make those parts searchable. This is a reference library
-   for generation, not another training dataset to edit by hand.
-3. Choose teachers, their shares, and the total sample count in
-   `configs/generation.yaml`, then run `generate`. It either takes a working song
-   as-is or combines verified parts into a new composition. The teacher writes
-   a matching user request and five short musical decisions; it preserves the
-   original code for existing songs and may adapt code for new combinations.
-4. TuneLM checks each answer. Passing examples are saved; failed answers get
-   correction retries and may be rejected. Your model shares count passing
-   examples: 200 samples at 40/30/30 means targets of 80/60/60.
-5. The result is plain JSONL: SFT gets requests plus answers; RL gets requests
-   and reference context so the model can practise producing its own answers.
-   Separate held-out rows are reserved for evaluation.
+1. Configure styles and writing examples in `configs/prompts.yaml`, then author
+   separate SFT and RL input banks with `create-prompts`. No source corpus, memory
+   index, tokenizer, or GPU is required for this stage.
+2. Inspect/edit the input JSONL. These are requests, with no finished answer or
+   composition plan. Co-creation alone can include an original starting pattern.
+3. Run `generate` to compose original SFT answers. The composer returns its own
+   plan, prose musical thinking, and executable Strudel code. It cannot
+   rewrite the input request. Retrieved examples are optional reference material.
+4. RL inputs are exported as answer-free tasks; no teacher composition is needed
+   for them. They are distinct requests, not copies derived from accepted SFT rows.
+5. Review execution diagnostics and listen before scaling or SFT/GRPO training.
 
-For example, a working bass-and-drums song becomes a row containing “Make a
-120 BPM bass-and-drums groove,” a short musical explanation, and its Strudel
-code. It is saved only if its checks pass.
-
-The normal command sequence is:
+Author and compose with the real configs (`.env.local` loads automatically):
 
 ```bash
-python scripts/collect_seeds.py --config configs/sources.yaml --ingest
-tunelm build-memory
-tunelm generate --config configs/generation.yaml
+tunelm create-prompts --dry-run
+tunelm create-prompts
+# Review datasets/prompts/generated/{sft,rl}/*.jsonl before an answer run.
+tunelm generate --dry-run
+tunelm generate --prepare-only
+tunelm generate
 ```
 
-Set model IDs and API keys before the last command. If generation stops, run
-that same command again: completed examples are kept and unfinished work resumes.
-YAML controls the process; JSONL stores the examples. The sections below explain
-setup, optional checks, and the files produced by each command.
+Authoring size is the `counts` block in `configs/prompts.yaml`. Answer size is
+`count` in `configs/generation.yaml`, or `--count` on `generate`; omit it to
+answer every eligible SFT input. `--prepare-only` freezes contexts and exports
+RL tasks without answer calls. Both stages resume their journals on the same
+unchanged command. Editing reviewed input JSONL is supported before answer
+generation; afterwards choose a new answer run and output path. Rerunning the
+author refuses to overwrite edited prompt files.
+
+Seed collection and `build-memory` remain available to build an optional reference
+library. Neither is a prerequisite for authoring prompts or original compositions.
+YAML controls the process; data, attempts, and accepted records remain JSON/JSONL.
 
 ## Install
 
@@ -59,13 +60,13 @@ compatibility have not been measured. No instance has been selected or launched.
 The initial training runner uses one CUDA process; distributed/DDP launch is
 rejected until checkpoint-merge synchronization is added.
 
-## Collect seeds (Step 1)
+## Collect the optional reference corpus
 
 ```bash
-python scripts/collect_seeds.py --config configs/sources.yaml --ingest
+python scripts/collect_seeds.py --config configs/registry/sources.yaml --ingest
 ```
 
-This downloads only the reviewed files listed in `configs/sources.yaml`, extracts
+This downloads only the reviewed files listed in `configs/registry/sources.yaml`, extracts
 their examples, includes the ten local starter compositions, removes exact code
 duplicates, and runs the existing verifier/stem extractor. No LLM or API key is
 needed. GitHub and Codeberg downloads use immutable commits and SHA-256 checksums.
@@ -93,8 +94,10 @@ browser/MIDI dependencies, unavailable sounds, and silent patterns are rejected.
 | `datasets/sources/provenance.jsonl` | External source URLs/lines, revisions, hashes, license evidence, normalization |
 | `datasets/sources/licenses/` | License notices and attribution, without raw code files |
 | `datasets/sources/collection.json` | Configuration, hashes, counts, ingestion status |
-| `datasets/seeds/compositions.jsonl` | Accepted seed list for generation |
-| `datasets/stems/verified.jsonl` | Verified reusable musical parts |
+| `datasets/sources/compositions.jsonl` | Accepted compositions |
+| `datasets/sources/verified.jsonl` | Verified reusable musical parts |
+| `datasets/sources/splits.json` | Source-family split assignments |
+| `datasets/sources/corpus.json` | Ingestion counts for this snapshot |
 | `results/ingestion/rejected.jsonl` | Failed candidates and verifier diagnostics |
 
 The initial 2026-11-06 snapshot had 103 accepted compositions and 185 stems.
@@ -107,7 +110,7 @@ Online reruns download sources temporarily and rebuild without appending duplica
 seeds. To rerun using the saved parsed JSONL, with no raw files or network:
 
 ```bash
-python scripts/collect_seeds.py --config configs/sources.yaml --offline --ingest
+python scripts/collect_seeds.py --config configs/registry/sources.yaml --offline --ingest
 ```
 
 The offline snapshot verifies configuration, local inputs, candidates, provenance,
@@ -133,7 +136,7 @@ For a starter-only demonstration, use `tunelm ingest examples/seeds.jsonl`.
 That rebuilds the corpus from only those ten rows, replacing the larger accepted
 collection. For your own manifest, use `tunelm ingest path/to/sources.jsonl`.
 
-## Verify and prepare memory (Step 2)
+## Verify and prepare optional memory
 
 ```bash
 tunelm verify examples/groove.js --cycles 32 --output results/verification/groove.json
@@ -147,11 +150,12 @@ The local implementation checks used lexical mode; semantic model inference has
 not run. Run seed collection/ingestion above before building memory. Memory
 building does not require OpenAI, Gemini, or Claude.
 
-Ingestion writes `datasets/seeds/compositions.jsonl`,
-`datasets/stems/verified.jsonl`, manifests, and rejection diagnostics under
+Ingestion writes `datasets/sources/compositions.jsonl`,
+`datasets/sources/verified.jsonl`, `datasets/sources/splits.json`, and
+`datasets/sources/corpus.json`. Rejection diagnostics stay under
 `results/ingestion/`. The index lives in `datasets/memory/`. Reingesting is a
 corpus rebuild; include all desired sources in the manifest. Family split
-assignments already recorded in `datasets/manifests/splits.json` cannot silently
+assignments already recorded in `datasets/sources/splits.json` cannot silently
 change. Accepted license identifiers are listed in `corpus.py`.
 
 ```bash
@@ -164,99 +168,75 @@ it to be cached. Use `--plan path/to/plan.yaml` to provide exact voices/densitie
 required techniques, category, or original co-creation code; see
 [training I/O](training-io.md). The global tempo convention is 4 beats per cycle.
 
-## Grounded teacher generation
+## Independent prompt authoring and composition
 
-Configure the complete model mix in `configs/generation.yaml`. Each entry has a
-unique ID, provider, model ID (or `model_env`), and fraction of accepted samples.
-Multiple models from the same provider are supported. Install SDKs with
-`pip install -e '.[teacher]'`.
+`configs/prompts.yaml` holds the style palette plus input author model fractions, stage/split counts,
+category scheduling, retries, and the output bank. `configs/generation.yaml`
+separately controls composer model fractions, the optional answer count, and retries. Both support
+OpenAI, Gemini, Anthropic, DeepSeek, and OpenRouter. DeepSeek and OpenRouter
+use the OpenAI-compatible client. Multiple models per provider are allowed.
+Model fractions sum to one and use largest-remainder allocation.
+Each SFT input is assigned to one composer. Exhausted inputs report shortfalls;
+failed answers never cause the input request to be rewritten.
 
-```yaml
-count: 200
-models:
-  - id: openai-main
-    provider: openai
-    model_env: OPENAI_TEACHER_MODEL
-    fraction: 0.40
-  - id: gemini-main
-    provider: gemini
-    model_env: GEMINI_TEACHER_MODEL
-    fraction: 0.30
-  - id: claude-main
-    provider: anthropic
-    model_env: CLAUDE_TEACHER_MODEL
-    fraction: 0.30
-```
+Provider keys are `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`,
+`DEEPSEEK_API_KEY`, and `OPENROUTER_API_KEY`.
+Write each provider model id on that profile's `model` field. Credentials are
+loaded from the shell or `.env.local` and never written to journals or the viewer.
+Native token usage is saved with attempts. An interrupted in-flight request may
+be billed again on resume; request counts are not a hard dollar spending cap.
 
-This is the model-selection portion of the supplied full YAML config. Set a
-literal `model: <provider-model-id>` instead of `model_env` when preferred. No
-specific paid model is chosen automatically. Fractions must sum to 1.0; zero
-fractions disable entries. For 200 samples, this mix targets 80/60/60 **accepted**
-examples. Largest-remainder rounding gives exact integer totals for smaller runs,
-with YAML order breaking ties. The shares apply to the complete accepted corpus,
-not separately to every train/validation/benchmark split.
+Composition reference modes:
 
-| Provider | `provider` | Default key environment variable |
-| --- | --- | --- |
-| OpenAI or compatible endpoint | `openai` | `OPENAI_API_KEY` |
-| Gemini Developer API | `gemini` | `GEMINI_API_KEY` |
-| Claude Messages API | `anthropic` (alias `claude`) | `ANTHROPIC_API_KEY` |
+- `none`: no reference context.
+- `api`: explained API, musical concepts, and playable instrument guide.
+- `optional`: the guide plus retrieved, annotated examples when memory exists.
 
-Optional per-model fields: `key_env`, `base_url_env`, and `max_tokens` (4096 by
-default). OpenAI honors `OPENAI_BASE_URL`; Claude honors `ANTHROPIC_BASE_URL`.
-Gemini uses API keys rather than Vertex ADC. Credentials stay in the environment.
-Gemini and Claude use native structured JSON responses, then the same local
-schema, verifier, and musical gates as OpenAI. See the [Google SDK docs](https://googleapis.github.io/python-genai/)
-and [Claude structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+References never require a particular source composition, scale, tempo, voice
+inventory, sound, or arrange template. The composer chooses unspecified details.
+A supplied co-creation pattern remains an actual user input to preserve. Runtime
+API/sound validity is distinct from artistic choice: supported methods can be
+used even if absent from the guide, and the catalog includes all 125 active GM
+names in the pinned official soundfont package as well as drums and synths.
+
+Registry entries explain meanings, musical uses, and pitfalls. Retrieved examples
+also explain their operations, measured sound sources, density, register, and
+classifier uncertainty. These are symbolic descriptions, not listening reviews.
+
+Author state lives under `results/prompt-generation/<run_id>/`; answer state is
+under `results/generation/<run_id>/`. Each has immutable jobs, run identity,
+accepted and attempt JSONL. Answer state also freezes independent RL/evaluation
+contexts in `auxiliary.jsonl`. Adding prompts and running `generate` again appends their answers to the existing
+dataset. A prompt that already has an answer is left as it is; add a new prompt id
+for another answer. Changing the model mix or reference snapshot still requires a
+new run ID. One writer per run is enforced.
+
+Production exports are `datasets/creative/sft/{train,val}.jsonl`,
+`datasets/creative/rl/{train,val}.jsonl`, and
+`datasets/creative/evaluation/benchmark.jsonl`. Warmup, SFT, and GRPO configs point
+to these paths. LFM training sends the listener request, so the training host does
+not need the teacher reference index. SFT/validation inputs must have distinct IDs and exact prompt text;
+sharing optional reference examples is not source-target leakage.
+
+The existing HTML viewer accepts both input banks and output datasets. Start it
+locally, then choose JSONL using its file picker or type a prompt:
 
 ```bash
-# No tokenizer, API clients, state writes, or paid requests:
-tunelm generate --config configs/generation.yaml --dry-run
-
-# Starts paid generation after the corpus, memory, models, and keys are ready:
-tunelm generate --config configs/generation.yaml
-
-# Resume after interruption: run the exact same command/config again.
-tunelm generate --config configs/generation.yaml
+tunelm view
 ```
 
-Each model runs sequentially against the frozen verified candidates and context.
-Accepted examples count toward its own quota. A failed candidate gets at most two
-correction retries; exhausted candidates advance to replacements. The per-model
-candidate budget is target × `max_candidates_per_sample` (default 5). If the bank
-or budget cannot fill a model's target, the run saves partial exports, reports its
-shortfall with status `exhausted`, and exits unsuccessfully. Its share is never
-silently given to another model.
+Open `http://127.0.0.1:8765/`. Compose uses the same teacher prompt, reference
+context, checks, and retries as `tunelm generate`, including the settings in
+`configs/generation.yaml`. The reply stays on the Compose tab and is not written
+into the training files. The first query loads the cached tokenizer. Prompt banks
+have no answer to play; accepted compositions do. Playback uses the official
+Strudel editor and requires internet for the runtime and audio assets.
 
-Run state is under `results/generation/<run_id>/`:
-
-- `run.json`: frozen input/model/tokenizer identity and target allocation.
-- `jobs.jsonl`: immutable source jobs and packed contexts, prepared before API calls.
-- `attempts.jsonl`: per-model retry records and completed response recovery.
-- `accepted.jsonl`: accepted examples, with `teacher_id` and `provider:model` provenance.
-- `progress.json`: per-model accepted counts, next jobs, budgets, and shortfalls.
-
-Reruns restore accepted rows, unfinished retries, and each model's cursor from
-the journals. Completed models need no client or API key on resume. Changing a
-configured mix, resolved model, source corpus, tokenizer, or memory snapshot
-requires a new run ID and output directory. Missing model environment variables
-may reuse that run's already-frozen model IDs. An in-flight request interrupted
-before a complete journal record may need to be sent again. One writer per run
-is enforced with an OS file lock on macOS/Linux.
-
-`--count`, `--run-id`, and `--dataset-dir` override YAML settings. To temporarily
-select one model, supply both `--provider` and `--teacher-model`; that creates a
-single profile with fraction 1.0. Use distinct run/output paths for comparisons.
-
-Final training exports remain plain JSONL:
-`datasets/sft/{train,val}.jsonl`, `datasets/rl/{train,val}.jsonl`, and
-`datasets/evaluation/benchmark.jsonl`. RL/benchmark records contain no solutions.
-Configuration files are YAML; saved data and run state remain JSON/JSONL.
-
-Generated datasets, memory indexes, and ingestion/generation state were cleared
-after the YAML migration. Seed collection/ingestion was subsequently completed;
-memory building and teacher generation remain separate next steps. No teacher
-calls or training runs were performed here.
+Each author call is shown a random sample of requests already accepted, capped by
+`avoid_sample` in the prompt config. Below that cap the call sees the whole bank.
+The same `run_id` resumes after the author wording or palette changes. A different
+`run_id` can use the same `output_dir`; its requests are added to the bank already
+there, and the runs can write at the same time.
 
 ## SFT, then GRPO on Vast.ai
 

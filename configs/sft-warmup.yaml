@@ -1,8 +1,8 @@
 schema_version: 2
 stage: sft
 curriculum: warmup
-train_file: datasets/sft/train.jsonl
-val_file: datasets/sft/val.jsonl
+train_file: datasets/creative/sft/train.jsonl
+val_file: datasets/creative/sft/val.jsonl
 output_dir: checkpoints/lfm3-warmup
 results_dir: results/lfm3-warmup
 training:

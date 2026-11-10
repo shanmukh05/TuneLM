@@ -21,6 +21,21 @@ in earlier lines. New writes resolving into `archive/` fail.
 See [datasets/README](../datasets/README.md) for output paths. Legacy data is under
 `archive/datasets/`; it is not accepted as the new schema implicitly.
 
+## Independent music requests
+
+`MusicRequest` JSONL contains an ID, `stage` (`sft` or `rl`), split, natural request,
+category, style, and author identity. An invented situation is part of the request text. `original_code` is allowed only as
+co-creation input. These rows contain no answer, composition plan, or reasoning
+target. The author stage writes separate `{sft,rl}/{train,val,benchmark}.jsonl` files.
+
+The teacher that writes the answer receives the fixed request and optional reference context. LFM receives the listener request only. The teacher's reply
+has `plan`, prose `thinking`, and `code`; there is no output `prompt` field to rewrite.
+Exported `Task.prompt_id` links back to the input bank. `Plan.intent_only` marks
+inferred defaults as advisory rather than mandatory voice/key/structure choices.
+SFT exports add the accepted answer. RL tasks come from the independent RL input
+bank, never by stripping answers from SFT rows. The plan stored for a composition
+records its chosen/observed musical details, not requirements invented for the user.
+
 ## Sources and stems
 
 Input Source fields: `id`, `family`, `source`, `license`, `code`, `description`,
@@ -40,7 +55,9 @@ and applied normalization. Local rows keep existing provenance. Collection time
 and candidate/provenance/duplicate/local-input hashes are in `collection.json`.
 Downloads are temporary; notices are under `datasets/sources/licenses/`, with
 evidence URLs/checksums in provenance. Only accepted rows become canonical
-`datasets/seeds/compositions.jsonl`. Candidates include later rejections.
+`datasets/sources/compositions.jsonl`. Verified parts are
+`datasets/sources/verified.jsonl`, and family splits are
+`datasets/sources/splits.json`. Candidates include later rejections.
 
 Stem records retain original expression/setup, source ID/family/license/hash,
 role/confidence, description/tags, methods, telemetry, and verifier version.
@@ -80,11 +97,7 @@ entry is `original_code`, and it requires that code to be supplied.
 
 ````text
 <think>
-1. 120 BPM, C minor, a layered groove.
-2. A 909 kick and backbeat.
-3. Low minor saw bass.
-4. Slow filter motion on the bass.
-5. Moderate gains with separated registers.
+120 BPM in C minor, built as a layered groove rather than one repeating cell. A 909 kick carries the backbeat, and a low minor saw holds the bass while its filter opens slowly. The gains stay moderate so the kick and bass keep separate registers.
 </think>
 ```strudel
 setcpm(120/4);
@@ -94,13 +107,14 @@ stack(s("bd*4, [~ sd]*2").bank("RolandTR909").gain(0.4),
 ````
 
 The outer text fence above illustrates the serialized completion. It contains
-exactly five numbered musical decisions and one executable code block, without
-additional prose. These summaries describe musical choices, not a claim to have
-captured a model's private internal reasoning.
+prose musical reasoning and one executable code block. The thinking describes
+the musical choices in ordinary language. It is not a claim to have captured a
+model's private internal reasoning. Older answers may still use five numbered lines.
 
-Task rows contain prompt, plan, packed context, source families, split, memory
-version, retrieval regime, and retrieved stem IDs. SFT Example adds summary/code,
-teacher identifier (`provider:model`), model-profile `teacher_id`, seed ID, pathway/persona, verified telemetry, and verifier
+Task rows contain prompt, plan, packed teacher context, source families, split, memory
+version, retrieval regime, and retrieved stem IDs. SFT and GRPO render the listener
+request for LFM and leave that stored context out of the model prompt. SFT Example adds summary/code,
+teacher identifier (`provider:model`), model-profile `teacher_id`, input ID, `compose` pathway, verified telemetry, and verifier
 version. The checkpoint template is used consistently across SFT, GRPO, and
 inference. Its opening `<think>` belongs to the generation prefix. Tokenization
 requires the full conversation to begin with exactly those prompt token IDs,

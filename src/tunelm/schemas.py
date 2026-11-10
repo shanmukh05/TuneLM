@@ -13,7 +13,21 @@ Role = Literal["drums_core", "perc_tops", "bass", "chords_pad", "arp_lead", "fx_
 Split = Literal["train", "val", "benchmark"]
 Category = Literal["atomic", "stack", "arrange", "cocreate"]
 PromptStyle = Literal[
-    "vague", "mood", "genre", "activity", "blend", "reference", "musical", "technical"
+    "vague",
+    "mood",
+    "genre",
+    "activity",
+    "blend",
+    "reference",
+    "musical",
+    "technical",
+    "groove",
+    "dialogue",
+    "restraint",
+    "solo",
+    "contrast",
+    "dislike",
+    "dance",
 ]
 ROLES = ("drums_core", "perc_tops", "bass", "chords_pad", "arp_lead", "fx_texture")
 
@@ -61,6 +75,7 @@ class Plan(Record):
     cycles: int = Field(default=16, ge=8, le=64)
     original_code: str | None = None
     preserve: list[Literal["original_code"]] = Field(default_factory=list)
+    intent_only: bool = False
 
     @model_validator(mode="after")
     def valid_preservation(self):
@@ -118,6 +133,7 @@ class Task(Record):
     retrieved_ids: list[str] = Field(default_factory=list)
     prompt_style: PromptStyle | None = None
     prompt_scenario: str | None = None
+    prompt_id: str | None = None
 
 
 class Example(Task):
@@ -126,7 +142,30 @@ class Example(Task):
     teacher: str
     teacher_id: str | None = None
     seed_id: str
-    pathway: Literal["backtranslate", "recombine"]
+    pathway: Literal["backtranslate", "recombine", "compose"]
     persona: Literal["vibe", "producer", "algorithmic", "cocreate"]
     verification: Telemetry
     verifier_version: str
+
+
+class MusicRequest(Record):
+    """An independently authored input, never a teacher answer or reasoning target."""
+
+    id: str
+    stage: Literal["sft", "rl"]
+    split: Split = "train"
+    prompt: str = Field(min_length=1)
+    category: Category
+    prompt_style: PromptStyle
+    prompt_scenario: str | None = None
+    original_code: str | None = None
+    author: str
+    author_id: str
+
+    @model_validator(mode="after")
+    def valid_original(self):
+        if self.category == "cocreate" and not self.original_code:
+            raise ValueError("Co-creation inputs need an original starting pattern")
+        if self.category != "cocreate" and self.original_code:
+            raise ValueError("Original code is only an input for co-creation")
+        return self

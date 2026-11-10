@@ -1,29 +1,24 @@
 """Schedule end-user request styles independently of composition task types.
 
-Private teacher briefs come from YAML and are frozen alongside generation jobs.
-Only the style and scenario labels accompany exported SFT and RL examples.
+Input-author briefs come from YAML and are frozen before any music is composed.
+The author invents the situation. No scene list is supplied.
 """
 
 import re
 
 from pydantic import Field, model_validator
 
-from tunelm.io import load_config
 from tunelm.schemas import PromptStyle, Record
 
 
-class Scenario(Record):
-    situation: str = Field(min_length=1)
-    mood: str = Field(min_length=1)
-    genres: list[str] = Field(min_length=1)
-
-
 class PromptConfig(Record):
-    """A repeatable style schedule and palette of musical situations, not user prompts."""
+    """A repeatable style schedule for request wording, not a list of musical situations."""
 
     schedule: list[PromptStyle] = Field(min_length=1)
     styles: dict[PromptStyle, str]
-    scenarios: list[Scenario] = Field(min_length=1)
+    writing_guidance: str = ""
+    openings: list[str] = Field(default_factory=list)
+    focuses: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def defined_styles(self):
@@ -31,33 +26,23 @@ class PromptConfig(Record):
             raise ValueError("Every scheduled prompt style needs instructions")
         if any(not instruction.strip() for instruction in self.styles.values()):
             raise ValueError("Prompt style instructions cannot be blank")
+        if any(not item.strip() for item in [*self.openings, *self.focuses]):
+            raise ValueError("Openings and focuses cannot be blank")
         return self
 
     def brief(self, index: int) -> dict:
-        """Pair a style with a scene; unspecified implementation choices stay private."""
+        """Give an input author a writing style, without a scene or an answer plan."""
         style = self.schedule[index % len(self.schedule)]
-        # Rotate after each schedule so a full run explores different style/scene pairings.
-        cycle = index // len(self.schedule)
-        scenario = self.scenarios[(index + cycle) % len(self.scenarios)]
-        return {
+        brief = {
             "style": style,
             "instructions": self.styles[style],
-            "scenario": scenario.model_dump(exclude={"schema_version"}),
-            "grounding": (
-                "Use the scenario as musical direction, not a checklist to copy into the prompt. "
-                "For recombine, adapt the composition to suit it within the plan. "
-                "For backtranslate, describe only compatible audible qualities; "
-                "do not claim an unsupported genre. "
-                "For co-creation, make a natural request to develop the supplied existing music. "
-                "Do not add BPM, key, instruments, or implementation requirements unless the "
-                "assigned style calls for them. Put your own musical choices in decisions and code."
-            ),
+            "writing_guidance": self.writing_guidance,
         }
-
-
-def load_prompt_config(path: str | None) -> PromptConfig | None:
-    """Opt into explicit style coverage without requiring it on legacy records."""
-    return PromptConfig.model_validate(load_config(path)) if path else None
+        if self.openings:
+            brief["opening"] = self.openings[index % len(self.openings)]
+        if self.focuses:
+            brief["focus"] = self.focuses[(index * 3 + 1) % len(self.focuses)]
+        return brief
 
 
 def validate_prompt_style(prompt: str, brief: dict | None) -> None:

@@ -52,7 +52,7 @@ def _instructions(result: dict, plan: Plan, code: str) -> float:
         checks.extend(method in result["methods"] for method in voice.techniques)
     if plan.original_code:
         checks.append(plan.original_code.strip() in code)
-    if plan.category == "arrange":
+    if plan.category == "arrange" and not plan.intent_only:
         checks.append("arrange" in result["methods"] or "cat" in result["methods"])
     return sum(checks) / len(checks) if checks else 1.0
 
@@ -86,13 +86,15 @@ def score(text: str, plan: Plan, verifier: Verifier | None = None) -> dict:
     components = {
         "format": 1.0,
         "execution": 1.0,
-        "roles": _role_coverage(result, plan),
         "mix_proxy": float(0 < telemetry["gain_max"] <= 2),
         "instructions": _instructions(result, plan, code),
     }
+    if not plan.intent_only:
+        components["roles"] = _role_coverage(result, plan)
     if plan.category != "atomic" and not plan.short_loop:
         components["evolution"] = evolution
-    harmony = _harmony(result["events"], plan.key)
+    key = plan.key if not plan.intent_only or "key" in plan.explicit else None
+    harmony = _harmony(result["events"], key)
     if harmony is not None:
         components["harmony"] = harmony
     # ponytail: equal weights are the initial baseline; tune only against listening review.
@@ -115,14 +117,15 @@ def quality_failures(scored: dict, plan: Plan) -> list[str]:
     components = scored["components"]
     if components["instructions"] < 1:
         failures.append("Explicit instructions or preservation failed")
-    if components.get("harmony", 1) < 0.9:
+    if not plan.intent_only and components.get("harmony", 1) < 0.9:
         failures.append("Scale adherence below 0.9")
     if components["mix_proxy"] < 1:
         failures.append("Gain exceeds the configured symbolic mixing range")
-    if components["roles"] < 1:
+    if components.get("roles", 1) < 1:
         failures.append("Requested complementary register/sound roles are missing")
     if (
-        not plan.short_loop
+        not plan.intent_only
+        and not plan.short_loop
         and plan.category != "atomic"
         and max(scored["evolution_windows"]) < 0.25
     ):

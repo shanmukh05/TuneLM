@@ -11,6 +11,8 @@ from tunelm.io import content_hash, project_path, read_json, read_jsonl, write_j
 from tunelm.schemas import Source, Stem, Telemetry
 from tunelm.verifier import Verifier
 
+CORPUS = "datasets/sources"
+
 LICENSES = {
     "MIT",
     "Apache-2.0",
@@ -89,7 +91,7 @@ def ingest(sources_file: str, *, cycles: int = 32, verifier: Verifier | None = N
     sources = [Source.model_validate(row) for row in read_jsonl(sources_file)]
     if len({s.id for s in sources}) != len(sources):
         raise ValueError("Duplicate source IDs")
-    splits_path = project_path("datasets/manifests/splits.json")
+    splits_path = project_path(f"{CORPUS}/splits.json")
     splits = read_json(splits_path).get("families", {}) if splits_path.exists() else {}
     seeds, stems, rejected, seen = [], {}, [], {}
     for source in sources:
@@ -130,10 +132,10 @@ def ingest(sources_file: str, *, cycles: int = 32, verifier: Verifier | None = N
         )
         for stem in extracted:
             stems.setdefault(stem.id, stem)
-    write_jsonl("datasets/seeds/compositions.jsonl", seeds)
-    write_jsonl("datasets/stems/verified.jsonl", [s.model_dump() for s in stems.values()])
+    write_jsonl(f"{CORPUS}/compositions.jsonl", seeds)
+    write_jsonl(f"{CORPUS}/verified.jsonl", [s.model_dump() for s in stems.values()])
     write_jsonl("results/ingestion/rejected.jsonl", rejected)
-    write_json("datasets/manifests/splits.json", {"schema_version": 2, "families": splits})
+    write_json(f"{CORPUS}/splits.json", {"schema_version": 2, "families": splits})
     report = {
         "schema_version": 2,
         "source_manifest": sources_file,
@@ -143,5 +145,5 @@ def ingest(sources_file: str, *, cycles: int = 32, verifier: Verifier | None = N
         "stems": len(stems),
         "rejected": len(rejected),
     }
-    write_json("datasets/manifests/corpus.json", report)
+    write_json(f"{CORPUS}/corpus.json", report)
     return report

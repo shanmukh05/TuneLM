@@ -345,7 +345,7 @@ def collect(config: CollectionConfig, *, offline=False, ingest_sources=False) ->
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/sources.yaml")
+    parser.add_argument("--config", default="configs/registry/sources.yaml")
     parser.add_argument(
         "--offline", action="store_true", help="Reuse a matching parsed JSONL snapshot"
     )

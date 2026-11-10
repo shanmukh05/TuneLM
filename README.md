@@ -4,17 +4,21 @@ TuneLM generates executable [Strudel](https://strudel.cc/) music using compositi
 memory and [`LiquidAI/LFM3-1.7B-Base`](https://huggingface.co/LiquidAI/LFM3-1.7B-Base).
 Runtime settings live in YAML under `configs/`; datasets remain plain JSONL.
 The implementation includes pinned licensed-source collection, ingestion, AST stem extraction,
-headless verification, retrieval/planning, grounded teacher generation with OpenAI,
-Gemini, or Claude, **SFT and GRPO RL**, inference, and offline evaluation.
+headless verification, independent prompt authoring, optional musical references, original composition with OpenAI,
+Gemini, Claude, DeepSeek, or OpenRouter, **SFT and GRPO RL**, inference, and offline evaluation.
 
-**Status (2026-11-06): implementation written and local smoke checks passed.**
-Training, paid teacher generation, model inference, and Vast.ai jobs have not run,
-as requested. GPU behavior and musical quality remain unverified. The linked
-checkpoint is LFM3 1.7B, pinned by revision.
+**Status (2026-11-09): prompt-first SFT/RL data pipeline implemented locally.**
+Earlier Gemini pilots produced 13 accepted examples. The new author/composer split
+was checked with real pilot inputs and no new paid calls. GPU training, model
+inference, and Vast.ai jobs remain unrun; listening quality remains unverified.
+The LFM3 1.7B checkpoint is pinned by revision.
 
-Seed collection/ingestion has run: **516 accepted compositions and 662 verified
-stems**. The full accepted list is `datasets/seeds/compositions.jsonl`; memory
-building and teacher generation are the next separate commands.
+The optional reference corpus has **516 compositions and 662 verified stems**.
+It is reference material, not a mandatory composition factory. Registry entries
+and retrieved examples explain musical behavior; unspecified choices belong to
+the composer. Author inputs with `configs/prompts.yaml`, inspect them, then
+compose with `configs/generation.yaml`. A smaller run lowers `counts` there, or
+sets `count` on generation.
 The 19-source allowlist includes MIT, CC0, GPL, and AGPL scopes; source downloads
 are temporary. See [source research](docs/source-research.md) for per-source results.
 
@@ -35,15 +39,16 @@ source .venv/bin/activate
 pip install -e '.[train,memory,teacher,dev]'
 npm ci
 tunelm verify examples/groove.js --cycles 32
-python scripts/collect_seeds.py --config configs/sources.yaml --ingest
+python scripts/collect_seeds.py --config configs/registry/sources.yaml --ingest
 tunelm build-memory --lexical
 ```
 
 Use `tunelm build-memory` for the configured semantic model instead of the explicit
 offline lexical baseline. Planning uses the pinned LFM tokenizer. Teacher calls
 and model execution require separate commands; see usage before launching them.
-Preview the configured multi-model sample mix without paid calls using
-`tunelm generate --config configs/generation.yaml --dry-run`.
+Preview input authoring without paid calls using
+`tunelm create-prompts --dry-run`.
+The complete two-stage run commands are in [Usage](docs/usage.md).
 
 Required training order:
 
@@ -56,7 +61,7 @@ tunelm train-grpo --config configs/grpo.yaml
 These require reviewed teacher-generated data and a CUDA host. Add `--dry-run
 --tokenize` to validate prerequisites without loading weights. No training jobs
 have been launched. `examples/seeds.jsonl` keeps the ten original starter inputs;
-the larger accepted collection is in `datasets/seeds/compositions.jsonl` after
+the larger accepted collection is in `datasets/sources/compositions.jsonl` after
 running the collector. Its small held-out set is not a production quality benchmark.
 
 New data uses `datasets/`, run outputs use `results/`, and adapters use

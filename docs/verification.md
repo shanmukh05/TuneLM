@@ -113,7 +113,7 @@ building must run again before paid generation.
 ## Seed collection and Step 1 completion — 2026-11-06
 
 Added `scripts/collect_seeds.py`, its Acorn literal-extraction helper, and the
-reviewed `configs/sources.yaml` allowlist. The real run downloaded nine unique
+reviewed `configs/registry/sources.yaml` allowlist. The real run downloaded nine unique
 files from two pinned MIT-licensed scopes, retaining raw bytes, notices, source
 URLs/lines, content checksums, and source-family grouping. It extracted all 130
 static Strudel records from the selected example library, including appended
@@ -144,8 +144,8 @@ silent programs. No programs were rewritten to bypass these gates.
 All six Strudel-TUI candidates were rejected for unsupported assignment/operator
 syntax. Final rejection stages were 27 syntax, 8 evaluation, 4 arc-query, and 4
 sound-catalog failures. Diagnostics remain in `results/ingestion/rejected.jsonl`.
-The accepted list is `datasets/seeds/compositions.jsonl`; candidate inputs and
-licensing evidence remain under `datasets/sources/`.
+The accepted list is `datasets/sources/compositions.jsonl`. Candidates, stems,
+family splits, and licensing evidence are in that same directory.
 
 The final cached/offline collector run reproduced the candidate manifest hash
 and accepted/stem/rejection counts. Manual inspection of the real persisted data

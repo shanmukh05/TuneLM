@@ -1,7 +1,8 @@
 """Exact model quotas and crash-recoverable JSONL generation state.
 
-Frozen jobs prevent retrieval or candidate changes on resume. Attempt journals
-are authoritative; progress summaries and dataset exports are rebuildable.
+Frozen jobs keep answered prompts stable. New prompts extend the run and their
+answers append to the dataset. Attempt journals are authoritative; progress
+summaries and dataset exports are rebuildable.
 Append batches inherit hash-checked accepted snapshots without changing old journals.
 """
 
@@ -92,7 +93,10 @@ class GenerationState:
         path = project_path(directory / "run.json")
         if path.exists():
             saved = read_json(path)
-            if saved.get("generation_version") != 3 or saved["identity"] != manifest["identity"]:
+            if (
+                saved.get("generation_version") != manifest["generation_version"]
+                or saved["identity"] != manifest["identity"]
+            ):
                 raise ValueError("Generation inputs/model mix changed; choose a new run_id")
             jobs = read_jsonl(directory / "jobs.jsonl")
             if content_hash(jobs) != saved["jobs_hash"]:
@@ -140,7 +144,11 @@ class GenerationState:
 
     def _restore_cursor(self, name: str):
         while self.cursors[name] < self.budgets[name]:
-            task = sample_task(self.jobs[self.cursors[name]], name)
+            job = self.jobs[self.cursors[name]]
+            if job.get("model_id", name) != name:
+                self.cursors[name] += 1
+                continue
+            task = sample_task(job, name)
             entries = self.history[task.id]
             if task.id not in self.accepted and len(entries) < self.manifest["config"].get(
                 "max_attempts", 3

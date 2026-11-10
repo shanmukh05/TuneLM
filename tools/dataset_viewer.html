@@ -10,24 +10,41 @@
     * { box-sizing: border-box; }
     body { margin: 0 auto; max-width: 1440px; padding: 28px; }
     h1 { margin: 0; font-size: 1.7rem; } h2 { font-size: 1rem; margin: 0 0 10px; color: #a8b9c8; }
-    p { margin: 8px 0 16px; } .hint { color: #9eafbd; font-size: .9rem; }
+    p { margin: 8px 0 16px; } .hint { color: #9eafbd; font-size: .9rem; margin: 4px 0 0; }
     button, select, input { font: inherit; border: 1px solid #435463; border-radius: 7px; background: #202b34; color: inherit; padding: 8px 12px; }
     button { cursor: pointer; } button:hover { background: #344957; } button:disabled { opacity: .4; cursor: default; }
     input[type="search"] { flex: 1; min-width: 160px; }
+    textarea { width: 100%; min-height: 96px; resize: vertical; font: inherit; border: 1px solid #435463; border-radius: 7px; background: #202b34; color: inherit; padding: 8px 12px; }
+    #query-model { min-width: 220px; }
     label { display: flex; align-items: center; gap: 8px; }
-    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 18px 0; }
-    #drop { border: 1px dashed #536a7b; border-radius: 10px; padding: 18px; background: #19222a; }
+    .tabs, .toolbar, .examples { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .examples { margin: 12px 0 16px; }
+    .tabs { margin: 18px 0; }
+    .tabs button[aria-selected="true"] { border-color: #77dbba; background: #254038; }
+    .toolbar { margin: 0 0 12px; }
+    #drop { border: 1px dashed #536a7b; border-radius: 10px; padding: 18px; background: #19222a; margin-bottom: 12px; }
     #drop.active { border-color: #77dbba; }
     #notice { min-height: 24px; color: #92dfc2; overflow-wrap: anywhere; }
-    main { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 20px; }
+    main { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; }
     #list { max-height: 75vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
     #list button { text-align: left; } #list button[aria-current="true"] { border-color: #77dbba; background: #254038; }
     #list small { display: block; color: #b3c3ce; }
     .card { padding: 18px; border: 1px solid #303f4b; border-radius: 10px; background: #181f26; margin-bottom: 16px; }
-    .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-    .badge { background: #293a46; border-radius: 20px; padding: 4px 12px; font-size: .85rem; }
+    .status { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid #303f4b; border-radius: 10px; background: #181f26; margin-bottom: 16px; }
+    .status[data-kind="working"] { border-color: #77dbba; }
+    .status[data-kind="error"] { border-color: #e07a7a; }
+    .status[data-kind="error"] strong { color: #f3c7c7; }
+    .spinner { width: 16px; height: 16px; margin-top: 4px; border: 2px solid #435463; border-top-color: #77dbba; border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .stats, .facts { display: flex; flex-wrap: wrap; gap: 8px; }
+    .stat, .fact { background: #202b34; border-radius: 8px; padding: 8px 12px; min-width: 110px; }
+    .stat b, .fact b { display: block; font-weight: 650; }
+    .stat span, .fact span { color: #9eafbd; font-size: .75rem; }
+    .facts { margin-bottom: 16px; }
     pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 ui-monospace, monospace; }
-    #prompt { white-space: pre-wrap; } details summary { cursor: pointer; color: #b8ccda; margin-bottom: 8px; }
+    #prompt, #compose-prompt, .prose { white-space: pre-wrap; }
+    ol, ul { margin: 0; padding-left: 1.2rem; } li + li { margin-top: 6px; }
+    details summary { cursor: pointer; color: #b8ccda; margin-bottom: 8px; }
     iframe { width: 100%; height: 450px; border: 1px solid #435463; border-radius: 8px; }
     [hidden] { display: none !important; }
     @media (max-width: 800px) { body { padding: 16px; } main { grid-template-columns: 1fr; } #list { max-height: 220px; } }
@@ -36,43 +53,99 @@
 <body>
   <header>
     <h1>TuneLM dataset listener</h1>
-    <p class="hint">Browse prompts, code, retrieval context, verification, and teacher attempts. Files stay in your browser.
-      Loading the player sends only the selected code to strudel.cc; playback and sample downloads need internet.</p>
+    <p class="hint">Compose asks a teacher model on this machine. Load reads JSONL that stays in your browser. Playback sends only the selected code to strudel.cc.</p>
   </header>
-  <section id="drop" aria-label="Load dataset">
-    <label>Open JSONL / JSON <input id="files" type="file" accept=".jsonl,.json" multiple></label>
-    <p class="hint">Choose accepted.jsonl, attempts.jsonl, SFT/RL exports, or existing seeds. Add jobs.jsonl alongside attempts.jsonl to see rejected jobs' plans and context. You can also drop files here.</p>
-  </section>
-  <div class="toolbar">
-    <input id="search" type="search" placeholder="Search prompt, model, source, code…" aria-label="Search records">
-    <label>Type <select id="category"><option value="">All</option></select></label>
-    <label>Status <select id="status"><option value="">All</option></select></label>
-    <label>Request <select id="style"><option value="">All</option></select></label>
-    <button id="previous" disabled>← Previous</button><button id="next" disabled>Next →</button>
+  <div class="tabs" role="tablist">
+    <button id="tab-compose" type="button" role="tab" aria-selected="true" aria-controls="panel-compose">Compose</button>
+    <button id="tab-load" type="button" role="tab" aria-selected="false" aria-controls="panel-load">Load</button>
   </div>
-  <p id="notice" role="status" aria-live="polite">Open a dataset to begin.</p>
-  <main>
-    <nav id="list" aria-label="Dataset records"></nav>
-    <article id="detail" hidden>
-      <div class="badges" id="badges"></div>
-      <section class="card"><h2>Request</h2><div id="prompt"></div></section>
+
+  <section id="panel-compose" role="tabpanel" aria-label="Compose">
+    <div class="toolbar">
+      <label>Provider
+        <select id="query-provider">
+          <option value="openai">openai</option>
+          <option value="gemini">gemini</option>
+          <option value="anthropic">anthropic</option>
+          <option value="deepseek">deepseek</option>
+          <option value="openrouter">openrouter</option>
+        </select>
+      </label>
+      <label>Model <input id="query-model" placeholder="model id" autocomplete="off"></label>
+      <button id="query-send" type="button">Compose</button>
+    </div>
+    <div id="compose-status" class="status" data-kind="idle" role="status" aria-live="polite">
+      <span id="compose-spinner" class="spinner" hidden></span>
+      <div>
+        <strong id="compose-status-text">Ready.</strong>
+        <p id="compose-status-detail" class="hint">Type a model id and a prompt. Nothing is written into the training files. The first compose also loads the local tokenizer.</p>
+      </div>
+    </div>
+    <section id="compose-usage-card" class="card" hidden>
+      <h2>Usage</h2>
+      <div id="compose-usage" class="stats"></div>
+    </section>
+    <textarea id="query-prompt" placeholder="Type a listener request. A few words is fine."></textarea>
+    <div class="examples" aria-label="Example prompts">
+      <button type="button" data-prompt="rain on a tin roof">Vague · rain on a tin roof</button>
+      <button type="button" data-prompt="something tense and uneasy, like waiting for news you do not want">Mood · tense and uneasy</button>
+      <button type="button" data-prompt="a loose swing between bass and drums, with room for a short melody">Groove · loose swing</button>
+    </div>
+    <article id="compose-result" hidden>
+      <section class="card"><h2>Request</h2><div id="compose-prompt"></div></section>
       <section class="card">
         <h2>Listen</h2>
-        <div class="toolbar"><button id="play">Load Strudel player</button><button id="stop" disabled>Stop / close player</button></div>
-        <p id="player-note" class="hint">Load the player, then click play inside it. Changing records stops playback. The player uses the current official Strudel runtime; the dataset verifier is pinned separately.</p>
-        <div id="player"></div>
+        <div class="toolbar"><button id="compose-play" type="button">Load Strudel player</button><button id="compose-stop" type="button" disabled>Stop / close player</button></div>
+        <div id="compose-player"></div>
       </section>
-      <section class="card"><h2>Strudel code</h2><pre id="code"></pre></section>
-      <section class="card"><h2>Musical decisions</h2><pre id="summary"></pre></section>
-      <section class="card"><h2>Feedback / token usage</h2><pre id="feedback"></pre></section>
-      <details class="card"><summary>Plan and retrieval context</summary><pre id="context"></pre></details>
-      <details class="card"><summary>Complete record and metadata</summary><pre id="raw"></pre></details>
+      <section class="card"><h2>Strudel code</h2><pre id="compose-code"></pre></section>
+      <section class="card"><h2>Thinking</h2><div id="compose-decisions" class="prose"></div></section>
+      <section class="card"><h2>Feedback</h2><div id="compose-feedback"></div></section>
+      <details class="card"><summary>Plan and retrieval context</summary><pre id="compose-context"></pre></details>
     </article>
-  </main>
+  </section>
+
+  <section id="panel-load" role="tabpanel" aria-label="Load" hidden>
+    <section id="drop" aria-label="Load dataset">
+      <label>Open JSONL / JSON <input id="files" type="file" accept=".jsonl,.json" multiple></label>
+      <p class="hint">Choose accepted.jsonl, attempts.jsonl, SFT/RL exports, or existing seeds. Add jobs.jsonl alongside attempts.jsonl to see rejected jobs. You can also drop files here.</p>
+    </section>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search prompt, model, source, code…" aria-label="Search records">
+      <label>Type <select id="category"><option value="">All</option></select></label>
+      <label>Status <select id="status"><option value="">All</option></select></label>
+      <label>Request <select id="style"><option value="">All</option></select></label>
+      <button id="previous" type="button" disabled>← Previous</button><button id="next" type="button" disabled>Next →</button>
+    </div>
+    <p id="notice" role="status" aria-live="polite">Open a dataset to begin.</p>
+    <main>
+      <nav id="list" aria-label="Dataset records"></nav>
+      <article id="detail">
+        <p id="empty-detail" class="hint">Choose a record. Its request, parts, code, and checks show here.</p>
+        <div id="detail-body" hidden>
+          <div class="facts" id="facts"></div>
+          <section class="card"><h2>Request</h2><div id="prompt"></div></section>
+          <section class="card"><h2>Parts</h2><div id="voices"></div></section>
+          <section class="card">
+            <h2>Listen</h2>
+            <div class="toolbar"><button id="play" type="button">Load Strudel player</button><button id="stop" type="button" disabled>Stop / close player</button></div>
+            <p class="hint">Load the player, then click play inside it. Changing records stops playback.</p>
+            <div id="player"></div>
+          </section>
+          <section class="card"><h2>Strudel code</h2><pre id="code"></pre></section>
+          <section class="card"><h2>Thinking</h2><div id="summary" class="prose"></div></section>
+          <section class="card"><h2>Feedback</h2><div id="feedback"></div></section>
+          <section class="card"><h2>Usage</h2><div id="usage" class="stats"></div><p id="usage-empty" class="hint">This record has no token usage.</p></section>
+          <details class="card"><summary>Plan and retrieval context</summary><pre id="context"></pre></details>
+          <details class="card"><summary>Complete record</summary><pre id="raw"></pre></details>
+        </div>
+      </article>
+    </main>
+  </section>
   <script>
     // Normalize display shapes only; JSONL remains the authoritative dataset format.
     const byId = (id) => document.getElementById(id);
-    let records = [], filtered = [], selected = 0;
+    let records = [], filtered = [], selected = 0, composeCode = '', composeTimer = 0;
 
     function parseFile(text, name) {
       if (name.endsWith('.json')) {
@@ -86,10 +159,20 @@
       });
     }
 
+    function modelInfo(value) {
+      const teacher = typeof value.teacher === 'string' ? value.teacher : '';
+      const colon = teacher.indexOf(':');
+      if (colon > 0) return { provider: teacher.slice(0, colon), model: teacher.slice(colon + 1) };
+      const profile = typeof value.model_id === 'string' ? value.model_id : '';
+      const provider = profile.endsWith('-composer') ? profile.slice(0, -'-composer'.length) : '';
+      return { provider, model: provider ? '' : profile };
+    }
+
     function recordStatus(row) {
       if ('retry' in row) return row.accepted ? 'accepted attempt' : 'rejected attempt';
       if (row.task) return 'candidate';
       if (row.teacher) return 'accepted';
+      if (row.stage) return `${row.stage.toUpperCase()} input`;
       return row.code ? 'source' : 'prompt only (RL / evaluation)';
     }
 
@@ -98,11 +181,108 @@
       const job = jobs.get(row.job_index) ?? {};
       const value = { ...job.task, ...job, ...row.task, ...row, ...row.reply, ...row.accepted };
       if ('retry' in row && !row.reply && !row.accepted) value.code = null;
-      return { ...entry, value, status: recordStatus(row), category: value.plan?.category ?? value.category ?? 'unknown' };
+      return {
+        ...entry, value, status: recordStatus(row), model: modelInfo(value),
+        category: value.plan?.category ?? value.category ?? 'unknown',
+      };
+    }
+
+    function showTab(name) {
+      for (const tab of ['compose', 'load']) {
+        byId(`tab-${tab}`).setAttribute('aria-selected', String(tab === name));
+        byId(`panel-${tab}`).hidden = tab !== name;
+      }
+      clearPlayer('player', 'stop');
+      clearPlayer('compose-player', 'compose-stop');
+    }
+
+    function usageStats(usage) {
+      if (!usage || typeof usage !== 'object') return [];
+      const thoughts = usage.thoughts_token_count ?? usage.completion_tokens_details?.reasoning_tokens;
+      const rows = [
+        ['Prompt tokens', usage.prompt_token_count ?? usage.prompt_tokens ?? usage.input_tokens],
+        ['Output tokens', usage.candidates_token_count ?? usage.completion_tokens ?? usage.output_tokens],
+        ['Thinking tokens', thoughts],
+        ['Total tokens', usage.total_token_count ?? usage.total_tokens],
+      ];
+      return rows.filter(([, value]) => value != null);
+    }
+
+    function renderUsage(element, empty, usage) {
+      const stats = usageStats(usage);
+      element.replaceChildren();
+      if (empty) empty.hidden = stats.length > 0 || Boolean(usage);
+      if (!stats.length) {
+        if (!usage) return;
+        const pre = document.createElement('pre');
+        pre.textContent = format(usage);
+        element.append(pre);
+        return;
+      }
+      for (const [label, value] of stats) {
+        const item = document.createElement('div');
+        item.className = 'stat';
+        const number = document.createElement('b');
+        number.textContent = String(value);
+        const caption = document.createElement('span');
+        caption.textContent = label;
+        item.append(number, caption);
+        element.append(item);
+      }
+    }
+
+    function thinkingText(value) {
+      if (typeof value.thinking === 'string' && value.thinking.trim()) return value.thinking.trim();
+      if (typeof value.summary === 'string' && value.summary.trim()) return value.summary.trim();
+      if (Array.isArray(value.decisions)) {
+        return value.decisions.map((line, index) => `${index + 1}. ${line}`).join('\n');
+      }
+      return '';
+    }
+
+    function renderProse(element, text, empty) {
+      element.textContent = text && String(text).trim() ? String(text).trim() : empty;
+    }
+
+    function renderLines(element, lines, empty) {
+      element.replaceChildren();
+      const items = (Array.isArray(lines) ? lines : String(lines ?? '').split('\n')).map((line) => String(line).trim()).filter(Boolean);
+      if (!items.length) { element.textContent = empty; return; }
+      const list = document.createElement('ol');
+      for (const line of items) {
+        const item = document.createElement('li');
+        item.textContent = line.replace(/^\d+\.\s*/, '');
+        list.append(item);
+      }
+      element.append(list);
+    }
+
+    function renderVoices(plan) {
+      const element = byId('voices');
+      element.replaceChildren();
+      const voices = plan?.voices ?? [];
+      if (!voices.length) { element.textContent = 'No parts on this record.'; return; }
+      const list = document.createElement('ul');
+      for (const voice of voices) {
+        const item = document.createElement('li');
+        const role = voice.role ? `${voice.role}: ` : '';
+        item.textContent = `${role}${voice.query ?? ''}`.trim();
+        list.append(item);
+      }
+      element.append(list);
+    }
+
+    function setComposeStatus(kind, title, detail) {
+      const box = byId('compose-status');
+      box.dataset.kind = kind;
+      byId('compose-spinner').hidden = kind !== 'working';
+      byId('compose-status-text').textContent = title;
+      byId('compose-status-detail').textContent = detail;
     }
 
     async function openFiles(files) {
-      stopPlayer();
+      clearPlayer('player', 'stop');
+      showTab('load');
       try {
         const loaded = await Promise.all(Array.from(files, async (file) => {
           const rows = parseFile(await file.text(), file.name);
@@ -112,7 +292,7 @@
           });
         }));
         const entries = loaded.flat();
-        const jobs = new Map(entries.filter((e) => e.raw.task && e.raw.code).map((e) => [e.line - 1, e.raw]));
+        const jobs = new Map(entries.filter((e) => e.raw.task && (e.raw.code || e.raw.request)).map((e) => [e.line - 1, e.raw]));
         records = entries.map((entry) => normalize(entry, jobs));
         populateFilter('category', records.map((row) => row.category));
         populateFilter('status', records.map((row) => row.status));
@@ -142,11 +322,20 @@
 
     function renderList() {
       byId('list').replaceChildren();
+      if (!filtered.length) {
+        const empty = document.createElement('p');
+        empty.className = 'hint';
+        empty.textContent = records.length ? 'No records match these filters.' : 'No records loaded.';
+        byId('list').append(empty);
+        return;
+      }
       filtered.forEach((row, index) => {
         const button = document.createElement('button');
+        const who = [row.model.provider, row.model.model].filter(Boolean).join(' · ');
         button.append(document.createTextNode(`${index + 1}. ${row.category} · ${row.status}`));
         const small = document.createElement('small');
-        small.textContent = (row.value.prompt ?? row.value.description ?? row.value.id ?? row.file).slice(0, 90);
+        const prompt = (row.value.prompt ?? row.value.description ?? row.value.id ?? row.file).slice(0, 90);
+        small.textContent = who ? `${who} — ${prompt}` : prompt;
         button.append(small);
         button.onclick = () => { selected = index; showSelected(); };
         byId('list').append(button);
@@ -155,45 +344,66 @@
 
     function format(value) { return JSON.stringify(value, null, 2); }
 
+    function addFact(label, value) {
+      if (value == null || value === '') return;
+      const item = document.createElement('div');
+      item.className = 'fact';
+      const caption = document.createElement('span');
+      caption.textContent = label;
+      const body = document.createElement('b');
+      body.textContent = String(value);
+      item.append(caption, body);
+      byId('facts').append(item);
+    }
+
     function showSelected() {
-      stopPlayer();
+      clearPlayer('player', 'stop');
       const row = filtered[selected];
-      byId('detail').hidden = !row;
+      byId('detail-body').hidden = !row;
+      byId('empty-detail').hidden = Boolean(row);
       byId('previous').disabled = selected <= 0;
       byId('next').disabled = selected >= filtered.length - 1;
       byId('notice').textContent = `${filtered.length} of ${records.length} records`;
       if (!row) return;
       byId('notice').textContent += ` · ${selected + 1} / ${filtered.length} · ${row.file}:${row.line}`;
       const value = row.value;
-      for (const [index, button] of Array.from(byId('list').children).entries()) button.setAttribute('aria-current', String(index === selected));
-      byId('badges').replaceChildren();
-      const labels = [row.category, row.status, value.teacher ?? value.model_id, value.persona, value.pathway,
-        value.prompt_style, value.prompt_scenario,
-        value.retrieval_regime, value.split, value.plan?.bpm ? `${value.plan.bpm} BPM` : '', value.plan?.key];
-      labels.filter(Boolean).forEach((label) => {
-        const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = label;
-        byId('badges').append(badge);
-      });
+      for (const [index, button] of Array.from(byId('list').children).entries()) {
+        if (button.tagName === 'BUTTON') button.setAttribute('aria-current', String(index === selected));
+      }
+      byId('facts').replaceChildren();
+      addFact('File', `${row.file}:${row.line}`);
+      addFact('Status', row.status);
+      addFact('Provider', row.model.provider);
+      addFact('Model', row.model.model);
+      addFact('Category', row.category);
+      addFact('Style', value.prompt_style);
+      addFact('Split', value.split);
+      addFact('BPM', value.plan?.bpm);
+      addFact('Key', value.plan?.key);
+      addFact('Pathway', value.pathway);
+      addFact('Persona', value.persona);
+      addFact('Retrieval', value.retrieval_regime);
       byId('prompt').textContent = value.prompt ?? value.description ?? '(No request on this record)';
+      renderVoices(value.plan);
       byId('code').textContent = value.code ?? '(Answer-free task: no code to play)';
-      byId('summary').textContent = value.summary ?? value.decisions?.map((s, i) => `${i + 1}. ${s}`).join('\n') ?? '—';
-      byId('feedback').textContent = format({ feedback: row.raw.feedback ?? [], usage: row.raw.usage ?? null,
-        verification: value.verification ?? row.raw.score?.diagnostic ?? value.telemetry ?? null });
+      renderProse(byId('summary'), thinkingText(value), 'No thinking on this record.');
+      renderLines(byId('feedback'), row.raw.feedback ?? [], 'No feedback on this record.');
+      renderUsage(byId('usage'), byId('usage-empty'), row.raw.usage ?? value.usage);
       byId('context').textContent = format({ plan: value.plan, context: value.context,
-        source_families: value.source_families, retrieved_ids: value.retrieved_ids });
+        source_families: value.source_families, retrieved_ids: value.retrieved_ids,
+        verification: value.verification ?? row.raw.score?.diagnostic ?? value.telemetry ?? null });
       byId('raw').textContent = format(row.raw);
       byId('play').disabled = typeof value.code !== 'string' || !value.code.trim();
     }
 
-    function stopPlayer() {
-      byId('player').replaceChildren();
-      byId('stop').disabled = true;
+    function clearPlayer(containerId, stopId) {
+      byId(containerId).replaceChildren();
+      byId(stopId).disabled = true;
     }
 
-    function loadPlayer() {
-      const code = filtered[selected]?.value.code;
+    function mountPlayer(containerId, stopId, code) {
       if (!code) return;
-      stopPlayer();
+      clearPlayer(containerId, stopId);
       const bytes = new TextEncoder().encode(code);
       const base64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
       const frame = document.createElement('iframe');
@@ -202,10 +412,85 @@
       frame.setAttribute('allow', 'autoplay');
       frame.referrerPolicy = 'no-referrer';
       frame.src = `https://strudel.cc/#${encodeURIComponent(base64)}`;
-      byId('player').append(frame);
-      byId('stop').disabled = false;
+      byId(containerId).append(frame);
+      byId(stopId).disabled = false;
     }
 
+    function showComposeResult(payload) {
+      composeCode = typeof payload.code === 'string' ? payload.code : '';
+      byId('compose-result').hidden = false;
+      byId('compose-usage-card').hidden = false;
+      byId('compose-prompt').textContent = payload.prompt ?? '';
+      byId('compose-code').textContent = composeCode || '(No code returned)';
+      renderProse(byId('compose-decisions'), thinkingText(payload), 'No thinking returned.');
+      renderLines(byId('compose-feedback'), payload.feedback ?? [], 'No feedback. The reply passed the same checks as dataset generation.');
+      byId('compose-context').textContent = format({
+        plan: payload.plan, context: payload.context, source_families: payload.source_families,
+        retrieval_regime: payload.retrieval_regime, retrieved_ids: payload.retrieved_ids,
+      });
+      renderUsage(byId('compose-usage'), null, payload.usage);
+      if (!payload.usage) byId('compose-usage').textContent = 'The teacher did not report token usage.';
+      byId('compose-play').disabled = !composeCode.trim();
+      clearPlayer('compose-player', 'compose-stop');
+    }
+
+    async function askModel() {
+      const prompt = byId('query-prompt').value.trim();
+      const model = byId('query-model').value.trim();
+      const provider = byId('query-provider').value;
+      if (!prompt || !model) {
+        setComposeStatus('error', 'Missing model or prompt.', 'Type a model id and a listener request, then click Compose.');
+        return;
+      }
+      const button = byId('query-send');
+      button.disabled = true;
+      button.textContent = 'Composing…';
+      byId('compose-result').hidden = true;
+      byId('compose-usage-card').hidden = true;
+      const started = Date.now();
+      const tick = () => {
+        const seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
+        setComposeStatus('working', `Composing with ${provider} · ${model} · ${seconds}s`,
+          'Using the same teacher path as tunelm generate, including a retry when a check fails. The first compose also loads the local tokenizer.');
+      };
+      tick();
+      composeTimer = window.setInterval(tick, 1000);
+      try {
+        const response = await fetch('/api/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider, model, prompt }),
+        });
+        const body = await response.text();
+        let payload;
+        try { payload = JSON.parse(body); }
+        catch {
+          throw new Error('This page is a static file server. Stop it and run .venv/bin/tunelm view, then open http://127.0.0.1:8765/.');
+        }
+        if (!response.ok) throw new Error(payload.error || 'Query failed');
+        const seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
+        const feedback = Array.isArray(payload.feedback) ? payload.feedback.length : 0;
+        setComposeStatus('done', `Finished in ${seconds}s.`,
+          feedback ? `${feedback} check${feedback === 1 ? '' : 's'} reported. The reply is below and was not saved.` : 'The reply passed the local checks and was not saved.');
+        showComposeResult(payload);
+      } catch (error) {
+        const offline = location.protocol === 'file:';
+        setComposeStatus('error', 'Compose failed.', offline
+          ? 'Open this page with .venv/bin/tunelm view so a query can run.'
+          : error.message);
+      } finally {
+        window.clearInterval(composeTimer);
+        button.disabled = false;
+        button.textContent = 'Compose';
+      }
+    }
+
+    byId('tab-compose').onclick = () => showTab('compose');
+    byId('tab-load').onclick = () => showTab('load');
+    byId('query-send').onclick = askModel;
+    for (const button of document.querySelectorAll('[data-prompt]')) {
+      button.onclick = () => { byId('query-prompt').value = button.dataset.prompt; byId('query-prompt').focus(); };
+    }
     byId('files').onchange = (event) => openFiles(event.target.files);
     byId('search').oninput = applyFilters;
     byId('category').onchange = applyFilters;
@@ -213,8 +498,10 @@
     byId('style').onchange = applyFilters;
     byId('previous').onclick = () => { selected -= 1; showSelected(); };
     byId('next').onclick = () => { selected += 1; showSelected(); };
-    byId('play').onclick = loadPlayer;
-    byId('stop').onclick = stopPlayer;
+    byId('play').onclick = () => mountPlayer('player', 'stop', filtered[selected]?.value.code);
+    byId('stop').onclick = () => clearPlayer('player', 'stop');
+    byId('compose-play').onclick = () => mountPlayer('compose-player', 'compose-stop', composeCode);
+    byId('compose-stop').onclick = () => clearPlayer('compose-player', 'compose-stop');
     byId('drop').ondragover = (event) => { event.preventDefault(); byId('drop').classList.add('active'); };
     byId('drop').ondragleave = () => byId('drop').classList.remove('active');
     byId('drop').ondrop = (event) => {
