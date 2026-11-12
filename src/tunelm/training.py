@@ -24,8 +24,8 @@ from tunelm.io import (
     write_json,
 )
 from tunelm.responses import render_prompt, restore_thinking, tokenize_example
-from tunelm.rewards import score
-from tunelm.schemas import Example, Record, Task
+from tunelm.rewards import contract_score, overlong_penalty
+from tunelm.schemas import Example, Record, RequestContract, Task
 from tunelm.verifier import Verifier
 
 
@@ -40,9 +40,22 @@ class ModelSpec(Record):
     attention: str = "sdpa"
 
 
+class HubSpec(Record):
+    """Merged best and last checkpoints published under one repo-name pattern."""
+
+    org: str = Field(pattern=r"^[A-Za-z0-9._-]+$")
+    model: str = "lfm3-1.7B"
+    repo: str = "tunelm-v2-{model}-{stage}-{which}-{time}"
+    stage: str | None = None
+    private: bool = True
+    metric: str = Field(min_length=1)
+    greater_is_better: bool = False
+
+
 class TrainConfig(Record):
     stage: Literal["sft", "grpo"]
     model: ModelSpec = Field(default_factory=ModelSpec)
+    hub: HubSpec | None = None
     train_file: str
     val_file: str | None = None
     output_dir: str
@@ -120,6 +133,8 @@ def _rows(config: TrainConfig):
         ]
     if not train or any(r.split != "train" for r in train) or any(r.split != "val" for r in val):
         raise ValueError("Training/validation rows are empty or assigned to the wrong split")
+    if config.stage == "grpo" and any(r.contract is None for r in train + val):
+        raise ValueError("GRPO tasks need a request contract; author RL prompts with contracts")
     train_families = {f for r in train if not r.prompt_id for f in r.source_families}
     if train_families & {f for r in val if not r.prompt_id for f in r.source_families}:
         raise ValueError("Source-family leakage between training and validation")
@@ -150,7 +165,10 @@ def preflight(config: TrainConfig, *, tokenize: bool = False, offline: bool = Fa
     if invalid:
         raise ValueError(f"Unknown or reserved training fields: {sorted(invalid)}")
     if config.training.get("push_to_hub"):
-        raise ValueError("Automatic publication is not part of this pipeline")
+        raise ValueError("Use the hub config to upload a merged model; do not push the adapter")
+    from tunelm.hub import validate_hub
+
+    validate_hub(config)
     train, val = _rows(config)
     if config.training.get("eval_strategy", "no") != "no" and not val:
         raise ValueError("Configured evaluation requires a nonempty validation split")
@@ -264,8 +282,38 @@ def _save_run(config, trainer, tokenizer, report):
     write_json(Path(config.results_dir) / "metrics.json", trainer.state.log_history)
 
 
+def _finish(config, trainer, tokenizer, report, **extra) -> dict:
+    _save_run(config, trainer, tokenizer, report)
+    if config.hub is None:
+        return {"checkpoint": config.output_dir, **extra}
+    from tunelm.hub import publish_checkpoints
+
+    repos = publish_checkpoints(config, trainer, tokenizer)
+    saved = read_json(project_path(config.output_dir) / "run.json")
+    saved["hub"] = repos
+    write_json(project_path(config.output_dir) / "run.json", saved)
+    return {"checkpoint": config.output_dir, "hub": repos, **extra}
+
+
+def _track_best(config, trainer) -> None:
+    if config.hub is None:
+        return
+    from tunelm.hub import BestAdapter
+
+    trainer.add_callback(
+        BestAdapter(
+            config.hub.metric,
+            config.hub.greater_is_better,
+            project_path(config.output_dir) / "best-adapter",
+        )
+    )
+
+
 def train_sft(config: TrainConfig) -> dict:
     """Run completion-masked SFT, optionally continuing the warmup adapter."""
+    from tunelm.hub import require_hub_token
+
+    require_hub_token(config)
     _require_gpu()
     report = preflight(config, tokenize=True)
     from peft import PeftModel, get_peft_model
@@ -305,13 +353,13 @@ def train_sft(config: TrainConfig) -> dict:
         eval_dataset=dataset(val) if val else None,
         data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100),
     )
+    _track_best(config, trainer)
     write_json(
         Path(config.output_dir) / "run.json",
         {**report, "weights_loaded": True, "status": "running", "config": config.model_dump()},
     )
     trainer.train(resume_from_checkpoint=config.resume or None)
-    _save_run(config, trainer, tokenizer, report)
-    return {"checkpoint": config.output_dir, "stage": "sft"}
+    return _finish(config, trainer, tokenizer, report, stage="sft")
 
 
 def _merged_sft(config: TrainConfig) -> str:
@@ -352,23 +400,33 @@ def _file_hash(path: Path) -> str:
 
 
 class MusicalReward:
-    """TRL callable retaining component rewards and diagnostics per worker process."""
+    """TRL callable: request-contract reward minus soft overlong shaping, logged per rollout."""
 
     __name__ = "strudel_musical_reward"
 
-    def __init__(self, results_dir: str):
+    def __init__(self, results_dir: str, max_completion_length: int):
         rank = os.environ.get("RANK", "0")
         self.path = Path(results_dir) / f"rollouts-rank{rank}-{os.getpid()}.jsonl"
         self.verifier = Verifier()
+        self.limit = max_completion_length
 
-    def __call__(self, prompts, completions, plan_json, task_id, **kwargs):
+    def __call__(
+        self, prompts, completions, plan_json, contract_json, task_id, completion_ids, **kwargs
+    ):
         from tunelm.schemas import Plan
 
         rewards = []
-        for text, raw_plan, identity in zip(completions, plan_json, task_id, strict=True):
-            scored = score(
-                restore_thinking(text), Plan.model_validate_json(raw_plan), self.verifier
+        rows = zip(completions, plan_json, contract_json, task_id, completion_ids, strict=True)
+        for text, raw_plan, raw_contract, identity, ids in rows:
+            scored = contract_score(
+                restore_thinking(text),
+                RequestContract.model_validate_json(raw_contract),
+                Plan.model_validate_json(raw_plan),
+                self.verifier,
             )
+            penalty = overlong_penalty(len(ids), self.limit)
+            scored["components"]["overlong"] = penalty
+            scored["total"] -= penalty
             append_jsonl(
                 self.path,
                 {
@@ -384,6 +442,9 @@ class MusicalReward:
 
 def train_grpo(config: TrainConfig) -> dict:
     """Perform policy updates against real verifier rewards on a frozen task bank."""
+    from tunelm.hub import require_hub_token
+
+    require_hub_token(config)
     _require_gpu()
     report = preflight(config, tokenize=True)
     from peft import get_peft_model
@@ -405,6 +466,7 @@ def train_grpo(config: TrainConfig) -> dict:
                 {
                     "prompt": render_prompt(row, tokenizer),
                     "plan_json": row.plan.model_dump_json(),
+                    "contract_json": row.contract.model_dump_json(),
                     "task_id": row.id,
                 }
                 for row in rows
@@ -416,14 +478,14 @@ def train_grpo(config: TrainConfig) -> dict:
         model=model,
         args=args,
         processing_class=tokenizer,
-        reward_funcs=MusicalReward(config.results_dir),
+        reward_funcs=MusicalReward(config.results_dir, args.max_completion_length),
         train_dataset=dataset(train),
         eval_dataset=dataset(val) if val else None,
     )
+    _track_best(config, trainer)
     write_json(
         Path(config.output_dir) / "run.json",
         {**report, "weights_loaded": True, "status": "running", "config": config.model_dump()},
     )
     trainer.train(resume_from_checkpoint=config.resume or None)
-    _save_run(config, trainer, tokenizer, report)
-    return {"checkpoint": config.output_dir, "base": merged, "stage": "grpo"}
+    return _finish(config, trainer, tokenizer, report, base=merged, stage="grpo")

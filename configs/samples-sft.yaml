@@ -1,24 +1,19 @@
-# First create and review configs/prompts.yaml's independent input banks.
+# SFT answers only. First create and review the bank from configs/prompts-sft.yaml.
 schema_version: 2
 progress: true
 save_every: 10  # Refresh dataset JSONL after this many newly accepted records.
-run_id: creative-generation-003
+run_id: creative-generation-06
 prompts_dir: datasets/prompts/generated
-dataset_dir: datasets/creative_v1
+dataset_dir: datasets/samples/generated
 references: optional
 memory_dir: datasets/memory
-context_tokens: 6400
+context_tokens: 16384
 max_attempts: 3
 # Write each provider model id on model. Names are not read from the environment.
 models:
-  # - id: openai-composer
-  #   provider: openai
-  #   model: gpt-6-luna
-  #   fraction: 0.3
-  #   max_tokens: 16384
   - id: gemini-composer
     provider: gemini
-    model: gemini-4-argon
+    model: gemini-3.8-flash
     fraction: 1.0
     max_tokens: 16384
     thinking_level: low

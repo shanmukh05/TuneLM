@@ -6,7 +6,8 @@ new paid calls. GPU training, model inference, and Vast.ai jobs remain unrun.
 
 ## Flow and ownership
 
-`prompts.yaml` → independent SFT/RL request authoring → reviewed JSONL inputs.
+`prompts-sft.yaml` / `prompts-rl.yaml` → independent SFT and RL request authoring → reviewed JSONL inputs.
+RL requests → `export-rl` → answer-free GRPO tasks with contracts.
 SFT requests → original composition + optional references → executable answers.
 RL requests → frozen answer-free tasks. Both feed the existing SFT/GRPO stages.
 Source collection and memory are optional reference-library branches.
@@ -145,6 +146,7 @@ that saved base. With nonzero KL, disabling the new adapter exposes the SFT poli
 Retain the merged base with the RL adapter when transferring artifacts.
 
 Training uses TRL, saves native trainer checkpoints and final adapter/tokenizer
-artifacts, and exposes resume. GPU updates and checkpoint reloads remain
+artifacts, and exposes resume. A configured `hub` block also uploads the merged
+full model, best and last, using `HF_TOKEN`. GPU updates and checkpoint reloads remain
 unverified until the first Vast.ai run. See [usage](usage.md),
 [training I/O](training-io.md), and [verification evidence](verification.md).

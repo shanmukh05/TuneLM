@@ -21,7 +21,7 @@ from tunelm.io import (
 from tunelm.memory import Memory
 from tunelm.planner import make_plan, pack_context
 from tunelm.responses import render_prompt, restore_thinking
-from tunelm.rewards import score
+from tunelm.rewards import contract_score, score
 from tunelm.schemas import Plan, Task
 from tunelm.training import ModelSpec, _base_model, _file_hash, load_tokenizer
 
@@ -116,8 +116,14 @@ def predict(
     text = tokenizer.decode(tokens[0, size:], skip_special_tokens=False)
     text = text.split(tokenizer.eos_token)[0].rstrip()
     text = restore_thinking(text)
-    scored = score(text, task.plan)
-    return {"schema_version": 2, "id": task.id, "completion": text, **scored}
+    return {"schema_version": 2, "id": task.id, "completion": text, **_score(text, task)}
+
+
+def _score(text: str, task: Task) -> dict:
+    """RL-bank tasks use the GRPO contract reward; SFT-derived tasks keep the plan gate."""
+    if task.contract:
+        return contract_score(text, task.contract, task.plan)
+    return score(text, task.plan)
 
 
 def evaluate(tasks_file: str, predictions_file: str, directory: str) -> dict:
@@ -131,7 +137,7 @@ def evaluate(tasks_file: str, predictions_file: str, directory: str) -> dict:
     records = []
     for task in tasks:
         prediction = lookup.get(task.id)
-        scored = score(prediction["completion"] if prediction else "", task.plan)
+        scored = _score(prediction["completion"] if prediction else "", task)
         records.append(
             {
                 "schema_version": 2,

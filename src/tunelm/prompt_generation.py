@@ -1,13 +1,17 @@
-"""Author independent SFT and RL input banks before any music answers exist.
+"""Shared engine that authors one input bank (SFT or RL) before any music answers exist.
 
-Frozen briefs, exact author quotas, accepted requests, usage, and rejected attempts
-are journaled separately from composition generation. Both stages resume by job ID.
+A run's `stage` picks its `AuthorStage` (`prompting.SFT_STAGE`, `rl_prompts.RL_STAGE`);
+this module only owns quotas, journals, resume, de-duplication, and export. Banks
+share one output_dir so a request can never repeat across SFT and RL. Each author
+model runs at the same time; journals and the duplicate check stay serialized.
 """
 
 import random
 import re
+import threading
 from collections import Counter, defaultdict
-from contextlib import ExitStack, contextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -28,47 +32,23 @@ from tunelm.io import (
     write_json,
     write_jsonl,
 )
-from tunelm.prompting import PromptConfig, validate_prompt_style
-from tunelm.schemas import Category, MusicRequest, Record, Split
+from tunelm.prompting import SFT_STAGE, AuthorStage, PromptConfig, validate_prompt_style
+from tunelm.rl_prompts import RL_STAGE
+from tunelm.schemas import Category, MusicRequest, Split
 from tunelm.teachers import Teacher, TeacherModel
 from tunelm.verifier import Verifier
 
-PROMPT_SYSTEM = """Write ONE realistic end-user request for instrumental music.
-Return JSON with schema_version=2, prompt, and original_code (null normally).
-This is the input-authoring stage. Do NOT write the answer, an implementation plan,
-musical decisions for the composer, or a finished composition. You have no source
-composition to describe. The brief assigns a writing style, a category, and, when present, an opening and a
-focus. Follow that opening and that focus. They are the variation for this request.
-Invent the situation yourself. No situation list is provided. Choose a fresh reason
-for the music on every request. The reason can be a few words.
-When already_written is present, those requests are already accepted. Do not reuse
-their situation or their musical ask.
-Some requests are only a few words. Others are a few sentences. Do not make them
-all long. Vary the emotion too: joy, tenderness, tension, play, grief, calm,
-unease, anger, warmth, excitement. Do not make the bank mostly cozy or nostalgic.
-Do not recycle a scene you have used before, and do not fall back on a stock setup.
-The listener may be vague or specify several preferences. Leave genuine choices
-open; do not add a BPM/key/instrument inventory just to aid validation.
-Follow the assigned request style and category. Arrangement requests should ask
-for development in natural language. Atomic requests ask for one part. Only for
-co-creation, provide a short original Strudel starting pattern as original_code,
-and ask to develop it; that starting pattern is input material, not the answer.
-No real artist imitation, promised vocals, marketing copy, or fabricated API names.
-"""
-
-
-class PromptReply(Record):
-    prompt: str = Field(min_length=1)
-    original_code: str | None = None
+STAGES: dict[str, AuthorStage] = {"sft": SFT_STAGE, "rl": RL_STAGE}
 
 
 class PromptGenerationConfig(RunOptions):
-    """Counts describe independent inputs, not accepted music answers or rollouts."""
+    """One bank per config. Counts describe inputs, not music answers or rollouts."""
 
+    stage: Literal["sft", "rl"]
     run_id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
     output_dir: str
     palette: PromptConfig
-    counts: dict[Literal["sft", "rl"], dict[Split, int]]
+    counts: dict[Split, int]
     categories: list[Category] = Field(default_factory=lambda: ["stack", "arrange"])
     max_attempts: int = Field(default=2, ge=1, le=10)
     avoid_sample: int = Field(default=40, ge=0)
@@ -76,7 +56,7 @@ class PromptGenerationConfig(RunOptions):
 
     @model_validator(mode="after")
     def valid_counts(self):
-        counts = [n for splits in self.counts.values() for n in splits.values()]
+        counts = list(self.counts.values())
         if not counts or min(counts) < 0 or sum(counts) < 1 or not self.categories:
             raise ValueError("Prompt counts must be nonnegative and total at least one")
         if len({m.id for m in self.models}) != len(self.models):
@@ -87,31 +67,22 @@ class PromptGenerationConfig(RunOptions):
 
     @property
     def count(self) -> int:
-        return sum(n for splits in self.counts.values() for n in splits.values())
+        return sum(self.counts.values())
+
+    @property
+    def author(self) -> AuthorStage:
+        return STAGES[self.stage]
 
 
 def load_prompt_generation_config(path: str) -> PromptGenerationConfig:
-    """Load a prompt run, inheriting one parent file when `extends` is set."""
-    return PromptGenerationConfig.model_validate(_read_prompt_config(path, []))
-
-
-def _read_prompt_config(path: str, chain: list[str]) -> dict:
-    if path in chain:
-        raise ValueError(f"Prompt config extends itself: {path}")
-    raw = dict(load_config(path))
-    parent = raw.pop("extends", None)
-    if parent is None:
-        return raw
-    if chain:
-        raise ValueError("A prompt config can extend only one file")
-    if not isinstance(parent, str) or not parent.endswith((".yaml", ".yml")):
-        raise ValueError("extends must be a YAML config path")
-    return {**_read_prompt_config(parent, chain + [path]), **raw}
+    """Load one self-contained bank config (configs/prompts-sft.yaml or prompts-rl.yaml)."""
+    return PromptGenerationConfig.model_validate(load_config(path))
 
 
 def prompt_preview(config: PromptGenerationConfig) -> dict:
-    """Show author quotas and stage counts without clients, downloads, or writes."""
+    """Show author quotas and split counts without clients, downloads, or writes."""
     return {
+        "stage": config.stage,
         "counts": config.counts,
         "total": config.count,
         "model_targets": allocate_models(config.models, config.count),
@@ -128,19 +99,18 @@ def prompt_preview(config: PromptGenerationConfig) -> dict:
 def _prompt_jobs(config, models):
     assignments = [m["id"] for m in models for _ in range(m["target"])]
     jobs = []
-    for stage, splits in config.counts.items():
-        for split, count in splits.items():
-            for _ in range(count):
-                index = len(jobs)
-                job = {
-                    "stage": stage,
-                    "split": split,
-                    "model_id": assignments[index],
-                    "category": config.categories[index % len(config.categories)],
-                    "brief": config.palette.brief(index),
-                }
-                job["id"] = content_hash([config.run_id, index, job])[:24]
-                jobs.append(job)
+    for split, count in config.counts.items():
+        for _ in range(count):
+            index = len(jobs)
+            job = {
+                "stage": config.stage,
+                "split": split,
+                "model_id": assignments[index],
+                "category": config.categories[index % len(config.categories)],
+                "brief": config.palette.brief(index),
+            }
+            job["id"] = content_hash([config.run_id, index, job])[:24]
+            jobs.append(job)
     return jobs
 
 
@@ -158,12 +128,14 @@ def _open_prompt_run(config, directory):
         if targets[model.id] and not name:
             raise ValueError(f"Set model for {model.id} in the config")
         models.append({"id": model.id, "model": name, "target": targets[model.id]})
-    identity = content_hash([config.identity_config(), models, PROMPT_SYSTEM])
+    identity = content_hash([config.identity_config(), models, config.author.system])
     manifest = {"identity": identity, "config": config.model_dump(), "models": models}
     if saved:
         jobs = read_jsonl(directory / "jobs.jsonl")
         if saved["jobs_hash"] != content_hash(jobs):
             raise ValueError("Prompt jobs changed; use a new prompt run_id and output_dir")
+        if any(job["stage"] != config.stage for job in jobs):
+            raise ValueError(f"run_id {config.run_id} is not a {config.stage} bank run")
         if saved["identity"] != identity:
             saved = {**saved, "identity": identity, "config": manifest["config"], "models": models}
             write_json(saved_path, saved)
@@ -305,8 +277,8 @@ def _reject_repeat(prompt: str, seen: list[tuple[str, list[str], set[str], str]]
             )
 
 
-def _request_row(reply, job, teacher, seen):
-    validate_prompt_style(reply.prompt, job["brief"])
+def _request_row(reply, job, teacher, seen, author: AuthorStage):
+    validate_prompt_style(reply.prompt, job["brief"], allow_tempo_key=author.allow_tempo_key)
     _reject_repeat(reply.prompt, seen)
     row = MusicRequest(
         id=job["id"],
@@ -319,7 +291,9 @@ def _request_row(reply, job, teacher, seen):
         original_code=reply.original_code,
         author=teacher.identity,
         author_id=teacher.id,
+        contract=getattr(reply, "contract", None),
     )
+    author.check(row)
     if row.original_code:
         result = Verifier().request(row.original_code)
         if not result["valid"]:
@@ -327,25 +301,35 @@ def _request_row(reply, job, teacher, seen):
     return row.model_dump()
 
 
-def _author_job(config, job, teacher, entries, seen, directory, progress):
-    feedback = entries[-1]["feedback"] if entries else []
-    for retry in range(len(entries), config.max_attempts):
-        reply, accepted = None, None
-        progress.attempt(teacher.id, retry, config.max_attempts)
-        try:
-            payload = {
-                "brief": job["brief"],
-                "category": job["category"],
-                "stage": job["stage"],
-            }
-            shown = _avoid_sample(seen, config.avoid_sample)
-            if shown:
-                payload["already_written"] = shown
-            reply = teacher.generate(payload, feedback)
-            accepted = _request_row(reply, job, teacher, seen)
-            feedback = []
-        except ValueError as error:
-            feedback = [str(error)]
+def _author_payload(config, job, seen, lock) -> dict:
+    payload = {
+        "brief": job["brief"],
+        "category": job["category"],
+        "stage": job["stage"],
+        **config.author.payload(),
+    }
+    with lock:
+        shown = _avoid_sample(seen, config.avoid_sample)
+    if shown:
+        payload["already_written"] = shown
+    return payload
+
+
+def _copy_seen(seen, lock):
+    with lock:
+        return list(seen)
+
+
+def _commit_attempt(directory, job, teacher, retry, reply, accepted, feedback, seen, entries, lock):
+    """Journal one attempt. A prompt taken by a concurrent author becomes a retry."""
+    with lock:
+        if accepted:
+            try:
+                _reject_repeat(accepted["prompt"], seen)
+            except ValueError as error:
+                accepted, feedback = None, [str(error)]
+            else:
+                _remember_prompt(seen, accepted["prompt"])
         entry = {
             "job_id": job["id"],
             "retry": retry,
@@ -359,6 +343,25 @@ def _author_job(config, job, teacher, entries, seen, directory, progress):
         entries.append(entry)
         if accepted:
             append_jsonl(directory / "accepted.jsonl", accepted)
+    return accepted
+
+
+def _author_job(config, job, teacher, entries, seen, directory, progress, lock):
+    feedback = entries[-1]["feedback"] if entries else []
+    for retry in range(len(entries), config.max_attempts):
+        reply, accepted = None, None
+        with lock:
+            progress.attempt(teacher.id, retry, config.max_attempts)
+        try:
+            reply = teacher.generate(_author_payload(config, job, seen, lock), feedback)
+            accepted = _request_row(reply, job, teacher, _copy_seen(seen, lock), config.author)
+            feedback = []
+        except ValueError as error:
+            feedback = [str(error)]
+        accepted = _commit_attempt(
+            directory, job, teacher, retry, reply, accepted, feedback, seen, entries, lock
+        )
+        if accepted:
             return accepted
     return None
 
@@ -376,19 +379,47 @@ def _export_prompt_bank(config, manifest, accepted, status):
                     Path(config.output_dir) / stage / f"{split}.jsonl",
                     [r for r in rows if r["stage"] == stage and r["split"] == split],
                 )
+        bank = [r for r in rows if r["stage"] == config.stage]
         report = {
             "identity": manifest["identity"],
+            "stage": config.stage,
             "output_dir": config.output_dir,
             "status": status,
-            "accepted": len(rows),
+            "accepted": len(bank),
             "target": config.count,
             "valid": len(accepted) == config.count,
-            "stages": dict(Counter(r["stage"] for r in rows)),
-            "records_hash": content_hash(rows),
+            "splits": dict(Counter(r["split"] for r in bank)),
+            "records_hash": content_hash(bank),
             **config.runtime_settings(),
         }
-        write_json(Path(config.output_dir) / "manifest.json", report)
+        write_json(Path(config.output_dir) / config.stage / "manifest.json", report)
         return report
+
+
+def _reassign_removed_authors(config, jobs, accepted, history, directory) -> None:
+    """Give unfinished jobs to the current authors when the model list has changed.
+
+    Accepted requests keep the author that wrote them, and the job id stays so the
+    journal still matches.
+    """
+    current = {model.id for model in config.models}
+    pending = [
+        job
+        for job in jobs
+        if job["model_id"] not in current
+        and job["id"] not in accepted
+        and len(history[job["id"]]) < config.max_attempts
+    ]
+    if not pending:
+        return
+    quotas = allocate_models(config.models, len(pending))
+    assigned = [model_id for model_id, count in quotas.items() for _ in range(count)]
+    for job, model_id in zip(pending, assigned, strict=True):
+        job["model_id"] = model_id
+    write_jsonl(directory / "jobs.jsonl", jobs)
+    saved = read_json(directory / "run.json")
+    saved["jobs_hash"] = content_hash(jobs)
+    write_json(directory / "run.json", saved)
 
 
 def generate_prompts(config: PromptGenerationConfig) -> dict:
@@ -398,6 +429,7 @@ def generate_prompts(config: PromptGenerationConfig) -> dict:
         manifest, jobs = _open_prompt_run(config, directory)
         jobs = _claim_saved_prompts(config, manifest, jobs, directory)
         accepted, history = _restore_prompts(directory)
+        _reassign_removed_authors(config, jobs, accepted, history, directory)
         # Refresh a lagging export from the authoritative journals before resuming.
         _export_prompt_bank(config, manifest, accepted, "running")
         completed = sum(
@@ -441,33 +473,72 @@ def _prompt_checkpoint(config, directory, progress, status):
     )
 
 
-def _run_authors(config, manifest, jobs, accepted, history, directory, progress):
-    names = {m["id"]: m["model"] for m in manifest["models"]}
-    with ExitStack() as stack:
-        teachers = {}
-        last_saved = len(accepted)
-        for job in jobs:
-            if job["id"] in accepted or len(history[job["id"]]) >= config.max_attempts:
-                continue
-            profile = next(m for m in config.models if m.id == job["model_id"])
-            if profile.id not in teachers:
-                teachers[profile.id] = stack.enter_context(
-                    Teacher(
-                        profile.model_copy(update={"model": names[profile.id]}),
-                        model_id=profile.id,
-                        system=PROMPT_SYSTEM,
-                        response_model=PromptReply,
-                    )
-                )
-            seen = _shared_seen(config, accepted)
+def _pending_by_model(config, jobs, accepted, history) -> dict[str, list]:
+    pending = defaultdict(list)
+    for job in jobs:
+        if job["id"] not in accepted and len(history[job["id"]]) < config.max_attempts:
+            pending[job["model_id"]].append(job)
+    return pending
+
+
+def _publish(config, manifest, accepted, directory, progress, lock, saved_at):
+    """Record one finished job and refresh the export. The lock keeps exports ordered."""
+    with lock:
+        progress.advance(len(accepted))
+        _prompt_checkpoint(config, directory, progress, "running")
+        if len(accepted) - saved_at[0] >= config.save_every:
+            _export_prompt_bank(config, manifest, accepted, "running")
+            saved_at[0] = len(accepted)
+
+
+def _author_model(config, model_id, model_jobs, run):
+    """Own one model's client and work through its jobs. Other models run alongside."""
+    names, accepted, history, seen, directory, progress, lock, manifest, saved_at = run
+    profile = next((model for model in config.models if model.id == model_id), None)
+    if profile is None:
+        raise ValueError(f"Job author {model_id} is not in the current model list")
+    with Teacher(
+        profile.model_copy(update={"model": names[profile.id]}),
+        model_id=profile.id,
+        system=config.author.system,
+        response_model=config.author.reply,
+    ) as teacher:
+        for job in model_jobs:
             row = _author_job(
-                config, job, teachers[profile.id], history[job["id"]], seen, directory, progress
+                config, job, teacher, history[job["id"]], seen, directory, progress, lock
             )
-            if row:
-                accepted[row["id"]] = row
-                _remember_prompt(seen, row["prompt"])
-            progress.advance(len(accepted))
-            _prompt_checkpoint(config, directory, progress, "running")
-            if len(accepted) - last_saved >= config.save_every:
-                _export_prompt_bank(config, manifest, accepted, "running")
-                last_saved = len(accepted)
+            with lock:
+                if row:
+                    accepted[row["id"]] = row
+            _publish(config, manifest, accepted, directory, progress, lock, saved_at)
+
+
+def _run_authors(config, manifest, jobs, accepted, history, directory, progress):
+    """Run every author model at once. One model keeps the old one-at-a-time behavior."""
+    pending = _pending_by_model(config, jobs, accepted, history)
+    if not pending:
+        return
+    run = (
+        {model["id"]: model["model"] for model in manifest["models"]},
+        accepted,
+        history,
+        _shared_seen(config, accepted),
+        directory,
+        progress,
+        threading.Lock(),
+        manifest,
+        [len(accepted)],
+    )
+    errors = []
+    with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+        futures = [
+            pool.submit(_author_model, config, model_id, model_jobs, run)
+            for model_id, model_jobs in pending.items()
+        ]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as error:
+                errors.append(error)
+    if errors:
+        raise errors[0]

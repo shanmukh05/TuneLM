@@ -16,6 +16,7 @@ in earlier lines. New writes resolving into `archive/` fail.
 | Dense embedding matrix | NumPy `.npy`, no pickle; row IDs/model/revision in JSON |
 | Retrieval index | Rebuildable SQLite, with a matching memory version |
 | Model/adapter weights | safetensors plus native tokenizer/config JSON and custom code files |
+| Merged Hugging Face checkpoint | Full base weights with the LoRA baked in, named from the stage `hub` pattern |
 | Native periodic training checkpoints | Framework optimizer/RNG/trainer state |
 
 See [datasets/README](../datasets/README.md) for output paths. Legacy data is under

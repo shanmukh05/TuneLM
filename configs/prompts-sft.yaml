@@ -1,21 +1,19 @@
-# Full input-bank run, including the authoring palette.
+# SFT input bank: requests that teachers answer in `tunelm generate`.
+# The RL bank is configs/prompts-rl.yaml; both write to the same output_dir so a
+# request never repeats across banks.
 # In palette.schedule, a repeated style is a weight. brief() walks that list in
 # order, so musical is requested more often than vague or technical.
 # A smaller authoring run is a smaller counts block in this file.
 schema_version: 2
+stage: sft
 progress: true
 save_every: 10
 run_id: input-bank-14
 output_dir: datasets/prompts/generated
 counts:
-  sft:
-    train: 2000
-    val: 200
-    benchmark: 100
-  rl:
-    train: 0
-    val: 0
-    benchmark: 0
+  train: 2000
+  val: 200
+  benchmark: 100
 categories:
 - stack
 - arrange
@@ -24,7 +22,7 @@ categories:
 - stack
 - cocreate
 max_attempts: 3
-avoid_sample: 1000
+avoid_sample: 1
 
 models:
 - id: openrouter-composer-thinkingmachines

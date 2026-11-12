@@ -102,6 +102,19 @@ def summarize(events: list[dict], cycles: int) -> Telemetry:
     )
 
 
+def section_profiles(events: list[dict], cycles: int, parts: int = 4) -> list[dict]:
+    """Audible onset count and sound names in each equal slice of the evaluated cycles."""
+    sections = [{"onsets": 0, "sounds": set()} for _ in range(parts)]
+    for event in audible_onsets(events):
+        if not 0 <= event["begin"] < cycles:
+            continue
+        section = sections[min(parts - 1, int(event["begin"] * parts / cycles))]
+        section["onsets"] += 1
+        if "s" in (controls := _controls(event)):
+            section["sounds"].add(str(controls["s"]))
+    return sections
+
+
 def evolution_windows(events: list[dict], cycles: int) -> list[float]:
     signatures = _fingerprints(audible_onsets(events), cycles, False)
     return [

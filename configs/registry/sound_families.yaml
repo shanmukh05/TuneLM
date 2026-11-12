@@ -1,0 +1,167 @@
+# Closed families for RL request contracts. A contract may only name these keys.
+# sounds: exact executed names from sounds.yaml. Families may overlap.
+# kit_pieces: drum-machine suffixes; "bd" and "RolandTR909_bd" both match "bd".
+# low_notes: a pitched onset at or below MIDI 48 (C3) also counts, so a synth bass line is a bass.
+# A listener word with no family here (clay pot, sledgehammer) is left out of the contract.
+schema_version: 2
+families:
+  drums:
+    kit_pieces: [bd, sd, hh, oh, ht, mt, lt, cr, cp, perc, rim, cb, rd, sh, tb, misc, brk, fx]
+    sounds: [gm_synth_drum, gm_taiko_drum, gm_melodic_tom, gm_reverse_cymbal]
+  kick:
+    kit_pieces: [bd]
+  snare:
+    kit_pieces: [sd, rim]
+  hi_hat:
+    kit_pieces: [hh, oh]
+  clap:
+    kit_pieces: [cp]
+  cymbal:
+    kit_pieces: [cr, rd]
+    sounds: [gm_reverse_cymbal]
+  cowbell:
+    kit_pieces: [cb]
+  tom:
+    kit_pieces: [ht, mt, lt]
+    sounds: [gm_melodic_tom]
+  shaker:
+    kit_pieces: [sh]
+  tambourine:
+    kit_pieces: [tb]
+  taiko:
+    sounds: [gm_taiko_drum]
+  timpani:
+    sounds: [gm_timpani]
+  woodblock:
+    sounds: [gm_woodblock]
+  agogo:
+    sounds: [gm_agogo]
+  steel_drums:
+    sounds: [gm_steel_drums]
+  piano:
+    sounds: [piano, gm_piano, gm_epiano1, gm_epiano2]
+  electric_piano:
+    sounds: [gm_epiano1, gm_epiano2]
+  harpsichord:
+    sounds: [gm_harpsichord]
+  clavinet:
+    sounds: [gm_clavinet]
+  organ:
+    sounds: [gm_church_organ, gm_drawbar_organ, gm_percussive_organ, gm_reed_organ, gm_rock_organ]
+  guitar:
+    sounds: [gm_acoustic_guitar_nylon, gm_acoustic_guitar_steel, gm_electric_guitar_clean,
+      gm_electric_guitar_jazz, gm_electric_guitar_muted, gm_distortion_guitar, gm_overdriven_guitar,
+      gm_guitar_harmonics]
+  acoustic_guitar:
+    sounds: [gm_acoustic_guitar_nylon, gm_acoustic_guitar_steel]
+  electric_guitar:
+    sounds: [gm_electric_guitar_clean, gm_electric_guitar_jazz, gm_electric_guitar_muted,
+      gm_distortion_guitar, gm_overdriven_guitar]
+  bass:
+    low_notes: true
+    sounds: [gm_acoustic_bass, gm_electric_bass_finger, gm_electric_bass_pick, gm_fretless_bass,
+      gm_slap_bass_1, gm_slap_bass_2, gm_synth_bass_1, gm_synth_bass_2, gm_contrabass,
+      gm_lead_8_bass_lead]
+  violin:
+    sounds: [gm_violin, gm_fiddle, gm_pizzicato_strings, gm_tremolo_strings]
+  viola:
+    sounds: [gm_viola, gm_pizzicato_strings, gm_tremolo_strings]
+  cello:
+    sounds: [gm_cello, gm_pizzicato_strings, gm_tremolo_strings]
+  double_bass:
+    sounds: [gm_contrabass, gm_acoustic_bass, gm_pizzicato_strings]
+  strings:
+    sounds: [gm_string_ensemble_1, gm_string_ensemble_2, gm_tremolo_strings, gm_pizzicato_strings,
+      gm_synth_strings_1, gm_synth_strings_2, gm_violin, gm_viola, gm_cello, gm_contrabass, gm_fiddle]
+  harp:
+    sounds: [gm_orchestral_harp]
+  trumpet:
+    sounds: [gm_trumpet, gm_muted_trumpet]
+  trombone:
+    sounds: [gm_trombone]
+  tuba:
+    sounds: [gm_tuba]
+  french_horn:
+    sounds: [gm_french_horn]
+  brass:
+    sounds: [gm_brass_section, gm_synth_brass_1, gm_synth_brass_2, gm_trumpet, gm_muted_trumpet,
+      gm_trombone, gm_tuba, gm_french_horn]
+  flute:
+    sounds: [gm_flute, gm_piccolo, gm_pan_flute, gm_recorder]
+  piccolo:
+    sounds: [gm_piccolo]
+  recorder:
+    sounds: [gm_recorder]
+  pan_flute:
+    sounds: [gm_pan_flute]
+  shakuhachi:
+    sounds: [gm_shakuhachi]
+  ocarina:
+    sounds: [gm_ocarina]
+  clarinet:
+    sounds: [gm_clarinet]
+  oboe:
+    sounds: [gm_oboe]
+  english_horn:
+    sounds: [gm_english_horn]
+  bassoon:
+    sounds: [gm_bassoon]
+  saxophone:
+    sounds: [gm_soprano_sax, gm_alto_sax, gm_tenor_sax, gm_baritone_sax]
+  woodwinds:
+    sounds: [gm_flute, gm_piccolo, gm_recorder, gm_pan_flute, gm_clarinet, gm_oboe, gm_english_horn,
+      gm_bassoon, gm_soprano_sax, gm_alto_sax, gm_tenor_sax, gm_baritone_sax, gm_shakuhachi,
+      gm_ocarina]
+  harmonica:
+    sounds: [gm_harmonica]
+  accordion:
+    sounds: [gm_accordion, gm_bandoneon]
+  bagpipe:
+    sounds: [gm_bagpipe]
+  shanai:
+    sounds: [gm_shanai]
+  marimba:
+    sounds: [gm_marimba]
+  xylophone:
+    sounds: [gm_xylophone]
+  vibraphone:
+    sounds: [gm_vibraphone]
+  glockenspiel:
+    sounds: [gm_glockenspiel]
+  celesta:
+    sounds: [gm_celesta]
+  kalimba:
+    sounds: [gm_kalimba]
+  music_box:
+    sounds: [gm_music_box]
+  bells:
+    sounds: [gm_tubular_bells, gm_tinkle_bell, gm_glockenspiel, gm_celesta, gm_music_box]
+  banjo:
+    sounds: [gm_banjo]
+  sitar:
+    sounds: [gm_sitar]
+  koto:
+    sounds: [gm_koto]
+  shamisen:
+    sounds: [gm_shamisen]
+  dulcimer:
+    sounds: [gm_dulcimer]
+  vocals:
+    sounds: [gm_choir_aahs, gm_voice_oohs, gm_synth_choir, gm_pad_choir, gm_lead_6_voice]
+  pad:
+    sounds: [gm_pad_bowed, gm_pad_choir, gm_pad_halo, gm_pad_metallic, gm_pad_new_age, gm_pad_poly,
+      gm_pad_sweep, gm_pad_warm, gm_synth_strings_1, gm_synth_strings_2]
+  synth:
+    sounds: [sawtooth, square, triangle, sine, supersaw, gm_lead_1_square, gm_lead_2_sawtooth,
+      gm_lead_3_calliope, gm_lead_4_chiff, gm_lead_5_charang, gm_lead_7_fifths, gm_lead_8_bass_lead,
+      gm_synth_bass_1, gm_synth_bass_2, gm_synth_brass_1, gm_synth_brass_2]
+  noise:
+    sounds: [noise, white, pink, brown]
+  whistle:
+    sounds: [gm_whistle]
+  birds:
+    sounds: [gm_bird_tweet]
+  rain:
+    sounds: [gm_fx_rain]
+  ocean:
+    sounds: [gm_seashore]

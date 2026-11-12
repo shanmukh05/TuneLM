@@ -1,5 +1,12 @@
 schema_version: 2
 stage: sft
+hub:
+  org: tensorfiend
+  model: lfm3-1.7B
+  repo: tunelm-v2-{model}-{stage}-{which}-{time}
+  private: true
+  metric: eval_loss
+  greater_is_better: false
 adapter: checkpoints/lfm3-warmup
 train_file: datasets/creative/sft/train.jsonl
 val_file: datasets/creative/sft/val.jsonl

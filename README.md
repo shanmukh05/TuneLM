@@ -16,9 +16,10 @@ The LFM3 1.7B checkpoint is pinned by revision.
 The optional reference corpus has **516 compositions and 662 verified stems**.
 It is reference material, not a mandatory composition factory. Registry entries
 and retrieved examples explain musical behavior; unspecified choices belong to
-the composer. Author inputs with `configs/prompts.yaml`, inspect them, then
-compose with `configs/generation.yaml`. A smaller run lowers `counts` there, or
-sets `count` on generation.
+the composer. Author SFT inputs with `configs/prompts-sft.yaml`, inspect them, then
+compose with `configs/samples-sft.yaml`. RL inputs come from
+`configs/prompts-rl.yaml` and `tunelm export-rl`. A smaller run lowers `counts`
+there, or sets `count` on generation.
 The 19-source allowlist includes MIT, CC0, GPL, and AGPL scopes; source downloads
 are temporary. See [source research](docs/source-research.md) for per-source results.
 

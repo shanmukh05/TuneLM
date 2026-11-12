@@ -1,5 +1,12 @@
 schema_version: 2
 stage: grpo
+hub:
+  org: tensorfiend
+  model: lfm3-1.7B
+  repo: tunelm-v2-{model}-{stage}-{which}-{time}
+  private: true
+  metric: reward
+  greater_is_better: true
 train_file: datasets/creative/rl/train.jsonl
 val_file: datasets/creative/rl/val.jsonl
 output_dir: checkpoints/lfm3-grpo

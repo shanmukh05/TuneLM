@@ -35,7 +35,7 @@ def parser() -> argparse.ArgumentParser:
     _prompt_arguments(p)
     p.add_argument("--output", default="results/plans/latest.json")
     p = commands.add_parser("generate")
-    p.add_argument("--config", default="configs/generation.yaml")
+    p.add_argument("--config", default="configs/samples-sft.yaml")
     p.add_argument(
         "--env-file", default=".env.local", help="Literal KEY=value file; shell env wins"
     )
@@ -50,7 +50,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--prepare-only",
         action="store_true",
-        help="Freeze inputs and export RL tasks; no answer calls",
+        help="Freeze SFT inputs and benchmark tasks; no answer calls",
     )
     p.add_argument(
         "--dry-run",
@@ -63,9 +63,14 @@ def parser() -> argparse.ArgumentParser:
         help="Use a cached tokenizer; teacher calls still require network",
     )
     p = commands.add_parser("create-prompts")
-    p.add_argument("--config", default="configs/prompts.yaml")
+    p.add_argument(
+        "--config", required=True, help="configs/prompts-sft.yaml or configs/prompts-rl.yaml"
+    )
     p.add_argument("--env-file", default=".env.local")
     p.add_argument("--dry-run", action="store_true")
+    p = commands.add_parser("export-rl", help="Write answer-free GRPO tasks from the RL bank")
+    p.add_argument("--prompts-dir", default="datasets/prompts/generated")
+    p.add_argument("--dataset-dir", default="datasets/creative")
     p = commands.add_parser("view")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--env-file", default=".env.local")
@@ -76,6 +81,7 @@ def parser() -> argparse.ArgumentParser:
         p = commands.add_parser(name)
         p.add_argument("--config", required=True)
         p.add_argument("--model-config", default="configs/model.yaml")
+        p.add_argument("--env-file", default=".env.local")
         p.add_argument("--dry-run", action="store_true")
         p.add_argument(
             "--tokenize", action="store_true", help="Also verify actual tokenizer masks and lengths"
@@ -199,9 +205,16 @@ def _create_prompts(args):
     return prompt_preview(config) if args.dry_run else generate_prompts(config)
 
 
+def _export_rl(args):
+    from tunelm.rl_prompts import export_rl_tasks
+
+    return export_rl_tasks(args.prompts_dir, args.dataset_dir)
+
+
 def _train(args):
     from tunelm.training import TrainConfig, preflight, train_grpo, train_sft
 
+    load_env_file(args.env_file)
     raw = load_config(args.config)
     raw.setdefault("model", load_config(args.model_config))
     config = TrainConfig.model_validate(raw)
@@ -266,6 +279,7 @@ def main(argv: list[str] | None = None) -> None:
         "plan": _plan,
         "generate": _generate,
         "create-prompts": _create_prompts,
+        "export-rl": _export_rl,
         "train-sft": _train,
         "train-grpo": _train,
         "infer": _infer,

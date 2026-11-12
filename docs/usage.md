@@ -8,33 +8,47 @@ The legacy assets live under ignored `archive/` and are never pipeline outputs.
 
 The current pipeline starts with independent listener requests, not source songs:
 
-1. Configure styles and writing examples in `configs/prompts.yaml`, then author
-   separate SFT and RL input banks with `create-prompts`. No source corpus, memory
-   index, tokenizer, or GPU is required for this stage.
+1. Author each input bank from its own config with `create-prompts`:
+   `configs/prompts-sft.yaml` for SFT and `configs/prompts-rl.yaml` for RL. Each
+   file sets `stage`, its style palette, authors, and split counts. No source
+   corpus, memory index, tokenizer, or GPU is required for this stage.
 2. Inspect/edit the input JSONL. These are requests, with no finished answer or
    composition plan. Co-creation alone can include an original starting pattern.
-3. Run `generate` to compose original SFT answers. The composer returns its own
-   plan, prose musical thinking, and executable Strudel code. It cannot
-   rewrite the input request. Retrieved examples are optional reference material.
-4. RL inputs are exported as answer-free tasks; no teacher composition is needed
-   for them. They are distinct requests, not copies derived from accepted SFT rows.
+3. SFT: run `generate` (`configs/samples-sft.yaml`) to compose original answers.
+   The composer returns its own plan, prose musical thinking, and executable
+   Strudel code. It cannot rewrite the input request. Retrieved examples are
+   optional reference material. `generate` reads only the SFT bank.
+4. RL: run `export-rl` to turn the RL bank into answer-free GRPO tasks. No teacher
+   composition, tokenizer, or memory is needed. They are distinct requests, not
+   copies derived from accepted SFT rows.
 5. Review execution diagnostics and listen before scaling or SFT/GRPO training.
 
-Author and compose with the real configs (`.env.local` loads automatically):
-
 ```bash
-tunelm create-prompts --dry-run
-tunelm create-prompts
-# Review datasets/prompts/generated/{sft,rl}/*.jsonl before an answer run.
+# SFT (.env.local loads automatically)
+tunelm create-prompts --config configs/prompts-sft.yaml --dry-run
+tunelm create-prompts --config configs/prompts-sft.yaml
+# Review datasets/prompts/generated/sft/*.jsonl before an answer run.
 tunelm generate --dry-run
-tunelm generate --prepare-only
 tunelm generate
+
+# RL
+tunelm create-prompts --config configs/prompts-rl.yaml
+# Review datasets/prompts/generated/rl/*.jsonl, then:
+tunelm export-rl        # datasets/creative/rl/{train,val,benchmark}.jsonl
 ```
 
-Authoring size is the `counts` block in `configs/prompts.yaml`. Answer size is
-`count` in `configs/generation.yaml`, or `--count` on `generate`; omit it to
-answer every eligible SFT input. `--prepare-only` freezes contexts and exports
-RL tasks without answer calls. Both stages resume their journals on the same
+Both banks share `datasets/prompts/generated`, so a request never repeats across
+SFT and RL; each run writes only its own stage files and `<stage>/manifest.json`.
+Author models run at the same time, one worker each, so an eight-model mix
+finishes in about the time of the largest share.
+Each RL request is written together with a request contract that the GRPO reward
+scores; see [RL reward design](rl-reward-design.md). `export-rl` rebuilds its
+files from the bank each time and rechecks every contract.
+
+Authoring size is the `counts` block in each prompts config. Answer size is
+`count` in `configs/samples-sft.yaml`, or `--count` on `generate`; omit it to
+answer every eligible SFT input. `--prepare-only` freezes SFT contexts and
+benchmark tasks without answer calls. Both stages resume their journals on the same
 unchanged command. Editing reviewed input JSONL is supported before answer
 generation; afterwards choose a new answer run and output path. Rerunning the
 author refuses to overwrite edited prompt files.
@@ -170,9 +184,9 @@ required techniques, category, or original co-creation code; see
 
 ## Independent prompt authoring and composition
 
-`configs/prompts.yaml` holds the style palette plus input author model fractions, stage/split counts,
-category scheduling, retries, and the output bank. `configs/generation.yaml`
-separately controls composer model fractions, the optional answer count, and retries. Both support
+`configs/prompts-sft.yaml` and `configs/prompts-rl.yaml` each hold one bank's stage,
+style palette, author model fractions, split counts, category scheduling, retries,
+and the shared output bank. `configs/samples-sft.yaml` separately controls composer model fractions, the optional answer count, and retries. Both support
 OpenAI, Gemini, Anthropic, DeepSeek, and OpenRouter. DeepSeek and OpenRouter
 use the OpenAI-compatible client. Multiple models per provider are allowed.
 Model fractions sum to one and use largest-remainder allocation.
@@ -207,13 +221,16 @@ Author state lives under `results/prompt-generation/<run_id>/`; answer state is
 under `results/generation/<run_id>/`. Each has immutable jobs, run identity,
 accepted and attempt JSONL. Answer state also freezes independent RL/evaluation
 contexts in `auxiliary.jsonl`. Adding prompts and running `generate` again appends their answers to the existing
-dataset. A prompt that already has an answer is left as it is; add a new prompt id
-for another answer. Changing the model mix or reference snapshot still requires a
-new run ID. One writer per run is enforced.
+dataset. A prompt that already has an answer in that dataset is left as it is,
+including when a new `run_id` continues the same `dataset_dir`. The new run starts
+at the first prompt that has no saved answer. Add a new prompt id for another answer
+to a prompt that already has one. Changing the model mix or reference snapshot
+still requires a new run ID, and that new run keeps the answers already saved.
+One writer per run is enforced.
 
-Production exports are `datasets/creative/sft/{train,val}.jsonl`,
-`datasets/creative/rl/{train,val}.jsonl`, and
-`datasets/creative/evaluation/benchmark.jsonl`. Warmup, SFT, and GRPO configs point
+Production exports are `datasets/creative/sft/{train,val}.jsonl` and
+`datasets/creative/evaluation/benchmark.jsonl` from `generate`, and
+`datasets/creative/rl/{train,val,benchmark}.jsonl` from `export-rl`. Warmup, SFT, and GRPO configs point
 to these paths. LFM training sends the listener request, so the training host does
 not need the teacher reference index. SFT/validation inputs must have distinct IDs and exact prompt text;
 sharing optional reference examples is not source-target leakage.
@@ -227,7 +244,7 @@ tunelm view
 
 Open `http://127.0.0.1:8765/`. Compose uses the same teacher prompt, reference
 context, checks, and retries as `tunelm generate`, including the settings in
-`configs/generation.yaml`. The reply stays on the Compose tab and is not written
+`configs/samples-sft.yaml`. The reply stays on the Compose tab and is not written
 into the training files. The first query loads the cached tokenizer. Prompt banks
 have no answer to play; accepted compositions do. Playback uses the official
 Strudel editor and requires internet for the runtime and audio assets.
@@ -268,6 +285,9 @@ GPU behavior remains unverified; this is the first required hardware check.
 Full SFT continues `checkpoints/lfm3-warmup`. GRPO requires
 `checkpoints/lfm3-sft`, creates `checkpoints/lfm3-sft-merged`, then saves its fresh
 adapter to `checkpoints/lfm3-grpo`. Preserve the merged base and the RL adapter.
+When `hub` is set, the stage also merges the LoRA into the full weights and uploads
+`best` and `last` to Hugging Face. The name pattern lives in the stage config.
+`train-sft` and `train-grpo` read `HF_TOKEN` from `--env-file` (default `.env.local`).
 Reward/component/diagnostic traces are JSONL under `results/lfm3-grpo/`.
 
 ```bash

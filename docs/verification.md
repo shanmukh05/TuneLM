@@ -82,7 +82,7 @@ chosen models, and output quality remain unverified until actual API runs.
 All eight runtime configuration/registry files under `configs/` now use YAML.
 Datasets, frozen jobs, journals, progress, and manifests remain JSON/JSONL;
 native tokenizer, package, and adapter manifests retain their required formats.
-`generation.yaml` lists multiple named models with fractions of accepted rows.
+`samples-sft.yaml` lists multiple named models with fractions of accepted rows.
 Largest-remainder allocation targets exactly 80/60/60 for the default 200-row
 40/30/30 mix, and 3/2/2 for seven rows. Fractions and duplicate model IDs are
 validated. No paid model IDs were selected automatically.

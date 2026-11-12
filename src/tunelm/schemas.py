@@ -30,6 +30,7 @@ PromptStyle = Literal[
     "dance",
 ]
 ROLES = ("drums_core", "perc_tops", "bass", "chords_pad", "arp_lead", "fx_texture")
+KEY_PATTERN = r"^[A-G](?:#|b)?:(?:major|minor|dorian|mixolydian|phrygian|lydian|locrian)$"
 
 
 class Record(BaseModel):
@@ -64,10 +65,7 @@ class Voice(Record):
 
 class Plan(Record):
     bpm: float = Field(default=120, ge=30, le=300)
-    key: str | None = Field(
-        default="C:minor",
-        pattern=r"^[A-G](?:#|b)?:(?:major|minor|dorian|mixolydian|phrygian|lydian|locrian)$",
-    )
+    key: str | None = Field(default="C:minor", pattern=KEY_PATTERN)
     category: Category = "stack"
     voices: list[Voice] = Field(min_length=1, max_length=6)
     explicit: list[Literal["bpm", "key", "roles"]] = Field(default_factory=list)
@@ -121,6 +119,64 @@ class Stem(Record):
     verifier_version: str
 
 
+class FamilyClaim(Record):
+    """A sound family from `configs/registry/sound_families.yaml`, quoted from the request."""
+
+    family: str = Field(min_length=1)
+    quote: str = Field(min_length=1)
+
+
+class VoiceClaim(Record):
+    min: int = Field(ge=1, le=8)
+    max: int = Field(ge=1, le=8)
+    quote: str = Field(min_length=1)
+
+
+class TempoClaim(Record):
+    bpm: float = Field(ge=30, le=300)
+    quote: str = Field(min_length=1)
+
+
+class KeyClaim(Record):
+    key: str = Field(pattern=KEY_PATTERN)
+    quote: str = Field(min_length=1)
+
+
+class ShapeClaim(Record):
+    shape: Literal["build", "thin_out", "contrast"]
+    quote: str = Field(min_length=1)
+
+
+class SpaceClaim(Record):
+    space: Literal["sparse", "busy"]
+    quote: str = Field(min_length=1)
+
+
+class LoopClaim(Record):
+    quote: str = Field(min_length=1)
+
+
+class RequestContract(Record):
+    """What an RL request literally asks for that one verify can check.
+
+    Every claim quotes the request. Unfilled fields are not scored. Mood and genre
+    never appear here. `rewards.check_contract` enforces quotes and family names.
+    """
+
+    require: list[FamilyClaim] = Field(default_factory=list)
+    forbid: list[FamilyClaim] = Field(default_factory=list)
+    voices: VoiceClaim | None = None
+    tempo: TempoClaim | None = None
+    key: KeyClaim | None = None
+    shape: ShapeClaim | None = None
+    space: SpaceClaim | None = None
+    loop: LoopClaim | None = None
+
+
+def _absent(value) -> bool:
+    return value is None
+
+
 class Task(Record):
     id: str
     prompt: str = Field(min_length=1)
@@ -134,6 +190,7 @@ class Task(Record):
     prompt_style: PromptStyle | None = None
     prompt_scenario: str | None = None
     prompt_id: str | None = None
+    contract: RequestContract | None = Field(default=None, exclude_if=_absent)
 
 
 class Example(Task):
@@ -161,6 +218,7 @@ class MusicRequest(Record):
     original_code: str | None = None
     author: str
     author_id: str
+    contract: RequestContract | None = Field(default=None, exclude_if=_absent)
 
     @model_validator(mode="after")
     def valid_original(self):
@@ -168,4 +226,6 @@ class MusicRequest(Record):
             raise ValueError("Co-creation inputs need an original starting pattern")
         if self.category != "cocreate" and self.original_code:
             raise ValueError("Original code is only an input for co-creation")
+        if self.stage == "sft" and self.contract:
+            raise ValueError("Only RL inputs carry a request contract")
         return self

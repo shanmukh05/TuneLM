@@ -1,7 +1,8 @@
-"""Compose original music for independently authored, immutable input requests.
+"""Compose original SFT answers for independently authored, immutable input requests.
 
 Reference examples explain capabilities but never supply a mandatory composition.
-Only SFT inputs need teacher answers; independent RL inputs remain answer-free.
+Only the SFT bank is read here; RL inputs stay answer-free and are exported by
+`rl_prompts.export_rl_tasks` (`tunelm export-rl`).
 """
 
 from __future__ import annotations
@@ -101,13 +102,16 @@ class GenerationConfig(RunOptions):
 
 
 def load_prompt_banks(directory: str) -> dict[str, list[MusicRequest]]:
-    """Read user-reviewable JSONL inputs and reject duplicate IDs/text across all splits/stages."""
+    """Read user-reviewable JSONL inputs and reject duplicate IDs/text across all splits/stages.
+
+    A bank file that does not exist yet reads as empty.
+    """
     banks = {"sft": [], "rl": []}
     ids, prompts = set(), set()
     for stage in banks:
         for split in ["train", "val", "benchmark"]:
             path = project_path(Path(directory) / stage / f"{split}.jsonl")
-            for raw in read_jsonl(path):
+            for raw in read_jsonl(path) if path.exists() else []:
                 row = MusicRequest.model_validate(raw)
                 if row.stage != stage or row.split != split:
                     raise ValueError(f"Prompt stage/split disagrees with its file: {path}")
@@ -122,28 +126,21 @@ def load_prompt_banks(directory: str) -> dict[str, list[MusicRequest]]:
 
 def generation_preview(config: GenerationConfig) -> dict:
     """Inspect prerequisites and exact answer quotas without teacher clients or state writes."""
-    expected = [
-        Path(config.prompts_dir) / stage / f"{split}.jsonl"
-        for stage in ["sft", "rl"]
-        for split in ["train", "val", "benchmark"]
-    ]
+    expected = [Path(config.prompts_dir) / "sft" / f"{split}.jsonl" for split in ["train", "val"]]
     missing = [str(p) for p in expected if not project_path(p).exists()]
-    banks = load_prompt_banks(config.prompts_dir) if not missing else {"sft": [], "rl": []}
-    eligible = [r for r in banks["sft"] if r.split != "benchmark"]
+    eligible = [r for r in load_prompt_banks(config.prompts_dir)["sft"] if r.split != "benchmark"]
     count = config.count or len(eligible)
     if not missing and count > len(eligible):
         raise ValueError("Requested count exceeds existing SFT inputs; create more prompts first")
     return {
         "sft_inputs": len(eligible),
         "sft_answer_target": count,
-        "rl_inputs": len(banks["rl"]),
         "model_targets": allocate_models(config.models, count),
         "references": config.references,
         "max_teacher_requests": count * config.max_attempts,
-        "rl_answer_requests": 0,
         "memory_optional": True,
         "missing_inputs": missing,
-        "next_step": "tunelm create-prompts --config configs/prompts.yaml"
+        "next_step": "tunelm create-prompts --config configs/prompts-sft.yaml"
         if missing
         else "review inputs, then generate answers",
         "api_requests": 0,
@@ -198,6 +195,7 @@ def _input_task(request, config, tokenizer, memory, identity):
         retrieved_ids=[m["stem"]["id"] for m in included],
         prompt_style=request.prompt_style,
         prompt_scenario=request.prompt_scenario,
+        contract=request.contract,
     )
 
 
@@ -221,11 +219,12 @@ def _resolved_models(config, saved, count):
     return models
 
 
-def _generation_identity(config, banks, models, memory, parent, tokenizer):
+def _generation_identity(config, requests, models, memory, parent, tokenizer):
     return content_hash(
         {
             "config": config.identity_config(),
-            "inputs": {k: [r.model_dump() for r in v] for k, v in banks.items()},
+            # The empty "rl" slot keeps identities of runs made before RL left this module.
+            "inputs": {"sft": [r.model_dump() for r in requests], "rl": []},
             "models": models,
             "system": COMPOSE_SYSTEM,
             "memory": memory.version if memory else None,
@@ -237,55 +236,53 @@ def _generation_identity(config, banks, models, memory, parent, tokenizer):
     )
 
 
-def _frozen_banks(jobs, auxiliary, banks):
-    """Rebuild the prompt bank a run froze, rejecting edits to those requests."""
-    restored = {"sft": [], "rl": []}
-    current = {stage: {row.id: row for row in rows} for stage, rows in banks.items()}
+def _frozen_requests(jobs, auxiliary, requests):
+    """Rebuild the SFT bank a run froze, rejecting edits to those requests."""
+    restored = []
+    current = {row.id: row for row in requests}
     for job in jobs:
         row = MusicRequest.model_validate(job["request"])
-        match = current["sft"].get(row.id)
+        match = current.get(row.id)
         if match is None:
             raise ValueError("Existing prompts were removed. Add prompts to append answers")
         if match.model_dump() != row.model_dump():
             raise ValueError(f"Prompt {row.id} changed. Add a new prompt id to append another answer")
-        restored["sft"].append(row)
+        restored.append(row)
     for item in auxiliary:
         task = item["task"]
-        stage = item["stage"]
-        match = current[stage].get(task.get("prompt_id"))
+        match = current.get(task.get("prompt_id"))
         if match is None:
             raise ValueError("Existing prompts were removed. Add prompts to append answers")
         if match.prompt != task["prompt"]:
             raise ValueError(
                 f"Prompt {task.get('prompt_id')} changed. Add a new prompt id to append another answer"
             )
-        restored[stage].append(match)
+        restored.append(match)
     return restored
 
 
-def _extend_run(config, directory, saved, banks, memory, parent, tokenizer):
+def _extend_run(config, directory, saved, requests, memory, parent, tokenizer):
     """Add jobs for new prompts. Existing answers stay in the dataset."""
     if saved.get("generation_version") != 4 or saved.get("config") != config.model_dump():
         raise ValueError("Generation inputs/model mix changed; choose a new run_id")
     jobs = read_jsonl(directory / "jobs.jsonl")
     auxiliary = read_jsonl(directory / "auxiliary.jsonl")
-    old_banks = _frozen_banks(jobs, auxiliary, banks)
+    old_requests = _frozen_requests(jobs, auxiliary, requests)
     old_names = {model["id"]: model["model"] for model in saved["models"]}
-    eligible = [row for row in banks["sft"] if row.split != "benchmark"]
+    eligible = [row for row in requests if row.split != "benchmark"]
     models = _resolved_models(config, saved, len(eligible))
     if {model["id"]: model["model"] for model in models} != old_names:
         raise ValueError("Generation inputs/model mix changed; choose a new run_id")
     old_identity = _generation_identity(
-        config, old_banks, saved["models"], memory, saved.get("parent"), tokenizer
+        config, old_requests, saved["models"], memory, saved.get("parent"), tokenizer
     )
     if old_identity != saved["identity"]:
         raise ValueError("Generation inputs/model mix changed; choose a new run_id")
-    old_ids = {stage: {row.id for row in rows} for stage, rows in old_banks.items()}
-    new_sft = [row for row in banks["sft"] if row.id not in old_ids["sft"]]
-    new_rl = [row for row in banks["rl"] if row.id not in old_ids["rl"]]
-    if not new_sft and not new_rl:
+    old_ids = {row.id for row in old_requests}
+    new_sft = [row for row in requests if row.id not in old_ids]
+    if not new_sft:
         raise ValueError("Generation inputs/model mix changed; choose a new run_id")
-    identity = _generation_identity(config, banks, models, memory, parent, tokenizer)
+    identity = _generation_identity(config, requests, models, memory, parent, tokenizer)
     extra = []
     for model in models:
         previous = next(item["target"] for item in saved["models"] if item["id"] == model["id"])
@@ -293,7 +290,7 @@ def _extend_run(config, directory, saved, banks, memory, parent, tokenizer):
             raise ValueError("Generation inputs/model mix changed; choose a new run_id")
         extra.append({**model, "target": model["target"] - previous})
     added_jobs, added_auxiliary = _freeze_inputs(
-        {"sft": new_sft, "rl": new_rl},
+        new_sft,
         [row for row in new_sft if row.split != "benchmark"],
         config,
         tokenizer,
@@ -317,8 +314,8 @@ def _extend_run(config, directory, saved, banks, memory, parent, tokenizer):
 
 
 def _prepare_generation(config, tokenizer, directory):
-    banks = load_prompt_banks(config.prompts_dir)
-    eligible = [r for r in banks["sft"] if r.split != "benchmark"]
+    requests = load_prompt_banks(config.prompts_dir)["sft"]
+    eligible = [r for r in requests if r.split != "benchmark"]
     count = config.count or len(eligible)
     if not count or count > len(eligible):
         raise ValueError("Create a nonempty SFT input bank before generating answers")
@@ -330,20 +327,22 @@ def _prepare_generation(config, tokenizer, directory):
         if project_path(Path(config.memory_dir) / "metadata.json").exists():
             memory = Memory(config.memory_dir)
     parent = read_generation_snapshot(config.append_from_run)[0] if config.append_from_run else None
-    identity = _generation_identity(config, banks, models, memory, parent, tokenizer)
+    identity = _generation_identity(config, requests, models, memory, parent, tokenizer)
     auxiliary_path = directory / "auxiliary.jsonl"
     if saved and saved.get("identity") != identity:
-        saved, auxiliary = _extend_run(config, directory, saved, banks, memory, parent, tokenizer)
+        saved, auxiliary = _extend_run(
+            config, directory, saved, requests, memory, parent, tokenizer
+        )
     elif saved:
         auxiliary = read_jsonl(auxiliary_path)
         if saved.get("auxiliary_hash") != content_hash(auxiliary):
-            raise ValueError("Frozen RL/evaluation tasks changed")
+            raise ValueError("Frozen evaluation tasks changed")
     if saved:
         manifest = {**saved, "auxiliary_hash": saved["auxiliary_hash"]}
         state = GenerationState.open(directory, manifest, lambda: [])
         return state, auxiliary
     jobs, auxiliary = _freeze_inputs(
-        banks, eligible[:count], config, tokenizer, memory, identity, models
+        requests, eligible[:count], config, tokenizer, memory, identity, models
     )
     manifest = {
         "generation_version": 4,
@@ -358,18 +357,15 @@ def _prepare_generation(config, tokenizer, directory):
     return state, auxiliary
 
 
-def _freeze_inputs(banks, eligible, config, tokenizer, memory, identity, models):
+def _freeze_inputs(requests, eligible, config, tokenizer, memory, identity, models):
+    """Answer jobs for eligible requests; benchmark requests become answer-free tasks."""
     jobs, auxiliary = [], []
-    for stage, requests in banks.items():
-        selected = list(eligible) if stage == "sft" else requests
-        if stage == "sft":
-            selected += [r for r in requests if r.split == "benchmark"]
-        for request in selected:
-            task = _input_task(request, config, tokenizer, memory, identity)
-            if stage == "rl" or request.split == "benchmark":
-                auxiliary.append({"stage": stage, "task": task.model_dump()})
-            else:
-                jobs.append({"task": task.model_dump(), "request": request.model_dump()})
+    for request in [*eligible, *(r for r in requests if r.split == "benchmark")]:
+        task = _input_task(request, config, tokenizer, memory, identity)
+        if request.split == "benchmark":
+            auxiliary.append({"stage": "sft", "task": task.model_dump()})
+        else:
+            jobs.append({"task": task.model_dump(), "request": request.model_dump()})
     assignments = [m["id"] for m in models for _ in range(m["target"])]
     for job, model_id in zip(jobs, assignments, strict=True):
         job["model_id"] = model_id
@@ -457,7 +453,7 @@ def compose_request(
     name = model.strip()
     if not text or not name:
         raise ValueError("A prompt and a model id are required")
-    config = config or GenerationConfig.model_validate(load_config("configs/generation.yaml"))
+    config = config or GenerationConfig.model_validate(load_config("configs/samples-sft.yaml"))
     profile = _query_profile(config, provider, name)
     request = MusicRequest(
         id="query",
@@ -533,7 +529,44 @@ def _answer_job(config, state, index, profile, teacher, progress):
             return
 
 
-def _run_answers(config, state, auxiliary, progress):
+def _saved_prompt_ids(dataset_dir: str) -> set[str]:
+    """Prompt ids that already have an answer in this dataset, from any run."""
+    saved = set()
+    for split in ("train", "val"):
+        path = project_path(Path(dataset_dir) / "sft" / f"{split}.jsonl")
+        if not path.exists():
+            continue
+        for row in read_jsonl(path):
+            if row.get("prompt_id"):
+                saved.add(row["prompt_id"])
+    return saved
+
+
+def _credit_saved_answers(state, saved_ids: set[str]) -> None:
+    """Count dataset answers toward the quota so a new run_id continues the rest."""
+    if not saved_ids:
+        return
+    limit = state.manifest["config"].get("max_attempts", 3)
+    for name in state.targets:
+        skipped = 0
+        for job in state.jobs:
+            if job.get("model_id", name) != name:
+                continue
+            task = sample_task(job, name)
+            if task.id in state.accepted or len(state.history[task.id]) >= limit:
+                continue
+            if job["request"]["id"] in saved_ids:
+                skipped += 1
+        state.targets[name] = max(state.counts[name], state.targets[name] - skipped)
+
+
+def _shown_accepted(state, saved_ids: set[str]) -> int:
+    covered = {job["request"]["id"] for job in state.jobs if job["request"]["id"] in saved_ids}
+    fresh = sum(1 for row in state.accepted.values() if row.prompt_id not in saved_ids)
+    return len(covered) + fresh
+
+
+def _run_answers(config, state, auxiliary, progress, saved_ids: set[str]):
     names = {m["id"]: m["model"] for m in state.manifest["models"]}
     with ExitStack() as stack:
         last_saved = len(state.accepted)
@@ -551,8 +584,14 @@ def _run_answers(config, state, auxiliary, progress):
             while state.pending(profile.id):
                 index = state.cursors[profile.id]
                 if state.jobs[index]["model_id"] == profile.id:
-                    _answer_job(config, state, index, profile, teacher, progress)
-                    progress.advance(len(state.accepted))
+                    task = sample_task(state.jobs[index], profile.id)
+                    already = (
+                        state.jobs[index]["request"]["id"] in saved_ids
+                        and task.id not in state.accepted
+                    )
+                    if not already:
+                        _answer_job(config, state, index, profile, teacher, progress)
+                        progress.advance(_shown_accepted(state, saved_ids))
                 state.cursors[profile.id] += 1
                 state.checkpoint()
                 if len(state.accepted) - last_saved >= config.save_every:
@@ -566,15 +605,12 @@ def _save_generation(config, state, auxiliary, status):
         parent, previous = read_generation_snapshot(config.append_from_run)
         if parent != state.manifest["parent"]:
             raise ValueError("Parent accepted snapshot changed")
-    rl_tasks = [r["task"] for r in auxiliary if r["stage"] == "rl"]
-    benchmark = [r["task"] for r in auxiliary if r["stage"] == "sft"]
     report = export_training(
         previous + [r.model_dump() for r in state.accepted.values()],
         state.manifest["identity"],
         config.dataset_dir,
         allowed_previous=parent["identity"] if parent else None,
-        rl_tasks=rl_tasks,
-        benchmark_tasks=benchmark,
+        benchmark_tasks=[r["task"] for r in auxiliary],
     )
     progress = state.progress(status)
     report.update(
@@ -595,7 +631,7 @@ def _save_generation(config, state, auxiliary, status):
 
 
 def generate(config: GenerationConfig, tokenizer, *, prepare_only: bool = False) -> dict:
-    """Freeze input/reference snapshots, export RL tasks, then optionally author SFT answers."""
+    """Freeze SFT input/reference snapshots, then optionally author SFT answers."""
     directory = Path("results/generation") / config.run_id
     with ExitStack() as locks:
         locks.enter_context(generation_lock(directory))
@@ -606,10 +642,12 @@ def generate(config: GenerationConfig, tokenizer, *, prepare_only: bool = False)
         state, auxiliary = _prepare_generation(config, tokenizer, directory)
         if prepare_only:
             return _save_generation(config, state, auxiliary, "prepared")
+        saved_ids = _saved_prompt_ids(config.dataset_dir)
+        _credit_saved_answers(state, saved_ids)
         _save_generation(config, state, auxiliary, "running")
-        with _answer_progress(config, state) as progress:
+        with _answer_progress(config, state, saved_ids) as progress:
             try:
-                _run_answers(config, state, auxiliary, progress)
+                _run_answers(config, state, auxiliary, progress, saved_ids)
             except BaseException:
                 progress.finish("interrupted")
                 _save_generation(config, state, auxiliary, "interrupted")
@@ -623,16 +661,20 @@ def generate(config: GenerationConfig, tokenizer, *, prepare_only: bool = False)
             return _save_generation(config, state, auxiliary, status)
 
 
-def _answer_progress(config, state):
+def _answer_progress(config, state, saved_ids: set[str]):
     completed = 0
     for job in state.jobs:
         task = sample_task(job, job["model_id"])
-        if task.id in state.accepted or len(state.history[task.id]) >= config.max_attempts:
+        if (
+            task.id in state.accepted
+            or len(state.history[task.id]) >= config.max_attempts
+            or job["request"]["id"] in saved_ids
+        ):
             completed += 1
     return GenerationProgress(
         "Samples",
         len(state.jobs),
-        accepted=len(state.accepted),
+        accepted=_shown_accepted(state, saved_ids),
         completed=completed,
         attempts=sum(len(h) for h in state.history.values()),
         enabled=config.progress,
@@ -659,27 +701,20 @@ def export_training(
     directory="datasets",
     *,
     allowed_previous=None,
-    rl_tasks=(),
     benchmark_tasks=(),
 ) -> dict:
-    """Append SFT answers and new RL tasks. Existing rows stay in the dataset."""
+    """Append SFT answers and SFT benchmark tasks. Existing rows stay in the dataset."""
     del allowed_previous
     examples = [Example.model_validate(row) for row in rows]
-    rl_tasks = [Task.model_validate(r).model_dump() for r in rl_tasks]
-    benchmark_tasks = [Task.model_validate(r).model_dump() for r in benchmark_tasks]
+    benchmark = [Task.model_validate(r).model_dump() for r in benchmark_tasks]
     for split in ["train", "val"]:
         _append_rows(Path(directory) / f"sft/{split}.jsonl", [r for r in rows if r["split"] == split])
-        _append_rows(
-            Path(directory) / f"rl/{split}.jsonl", [r for r in rl_tasks if r["split"] == split]
-        )
-    benchmark = benchmark_tasks + [r for r in rl_tasks if r["split"] == "benchmark"]
     _append_rows(Path(directory) / "evaluation/benchmark.jsonl", benchmark)
     report = {
         "schema_version": 2,
         "identity": identity,
         "accepted": len(examples),
         "splits": {s: sum(r.split == s for r in examples) for s in ["train", "val", "benchmark"]},
-        "rl_tasks": len(rl_tasks),
         "evaluation_tasks": len(benchmark),
     }
     write_json(Path(directory) / "manifests/training.json", report)
