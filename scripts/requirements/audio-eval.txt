@@ -1,0 +1,13 @@
+# Separate environment from the TuneLM training and generation dependencies.
+fadtk==1.1.0
+faiss-cpu==1.12.0
+huggingface-hub==0.36.2
+laion-clap==1.1.7
+mauve-text==0.4.0
+numpy==1.26.4
+scipy==1.16.3
+toml==0.10.2
+torch==2.8.0
+torchaudio==2.8.0
+torchvision==0.23.0
+transformers==4.51.3

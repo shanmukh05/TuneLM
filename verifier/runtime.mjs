@@ -22,6 +22,11 @@ function event(hap) {
     part_begin: Number(hap.part.begin), part_end: Number(hap.part.end),
     onset: hap.hasOnset(), value: hap.value };
   finite(result);
+  if (Object.hasOwn(result.value, 'gain')) {
+    const gain = Number(result.value.gain);
+    if (!Number.isFinite(gain)) throw new Error('Invalid gain control');
+    result.value = { ...result.value, gain };
+  }
   return result;
 }
 

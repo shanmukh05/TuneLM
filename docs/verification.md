@@ -100,7 +100,7 @@ sample counts are both zero. The native verifier also passed with YAML registry
 files, and Ruff formatting/lint/complexity plus byte-compilation passed.
 
 The generation module now delegates frozen jobs, quota allocation, journal
-recovery, and per-model cursors to `generation_state.py`. All Python functions
+recovery, and per-model cursors to `src/tunelm/data/generation_state.py`. All Python functions
 remain within the configured complexity threshold of 10.
 
 After these checks, current generated corpus files, memory indexes, and
@@ -221,5 +221,30 @@ Memory, teacher generation, SFT/GRPO, and cloud jobs were not run.
 - Profile verifier throughput during actual rollouts before adding a worker
   pool, quantized training, or optional audio-semantic tooling.
 
-SFT and GRPO implementation are both present. Their hardware execution remains
-unverified because those runs were explicitly deferred, not because RL is optional.
+## MusicPrefs audio evaluation and package layout — 2026-11-15
+
+- Imported the pinned MusicPrefs snapshot and verified the 120 prompt IDs are
+  present for each of the seven archived models. FFprobe read all 840 saved WAVs.
+- Loaded the merged TuneLM SFT checkpoint and generated two real MusicPrefs
+  completions. Rendered both to 30-second WAVs, including piano, General MIDI,
+  and room reverb.
+- Scored those two prompts for TuneLM, MusicGen Large, and Stable Audio Open
+  with all four metrics. The smoke run used a separate small MAD reference.
+  A rerun with an unavailable inference executable returned identical WAV and
+  metrics CSV hashes.
+- Imported every TuneLM package module after the move, verified the installed
+  CLI with the starter Strudel composition, and loaded the Modal entry point.
+
+## MusicPrefs benchmark run — 2026-11-16
+
+Ran the pinned song-describer SFT checkpoint at revision
+`73a810799a8e91733058f1153cad01bb9e59ef1e` on a Vast.ai RTX 3090. The checkpoint
+generated a completion for all 120 prompts. The first pass rendered 82 clips,
+and the bounded retries brought coverage to 114. Four remaining clips used
+unregistered instruments and two failed in the offline audio worklet.
+
+All eight models were scored on the same 114 prompt IDs. The fixed MAD matrix
+contains 4,227 usable FMA-Pop tracks. Verified the recovered metric and input
+hashes, all 912 per-clip score rows, and all 114 saved TuneLM WAVs. Run artifacts
+are under `results/audio-eval/musicprefs-sft-song-describer-20261115-1151`.
+See [MusicPrefs audio evaluation](audio-evaluation.md) for the protocol.

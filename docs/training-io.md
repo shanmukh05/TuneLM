@@ -13,6 +13,7 @@ in earlier lines. New writes resolving into `archive/` fail.
 | Source and stem records; SFT/GRPO/benchmark tasks | JSONL |
 | Runtime configs, explicit plans, API/sound registry | YAML |
 | Split, corpus, run, and summary manifests | JSON |
+| Audio evaluation inputs | CSV with `model_name`, `audio_path`, `prompt`, and optional `prompt_id`. Saved WAVs live under model-named directories. See [audio evaluation](audio-evaluation.md). |
 | Dense embedding matrix | NumPy `.npy`, no pickle; row IDs/model/revision in JSON |
 | Retrieval index | Rebuildable SQLite, with a matching memory version |
 | Model/adapter weights | safetensors plus native tokenizer/config JSON and custom code files |

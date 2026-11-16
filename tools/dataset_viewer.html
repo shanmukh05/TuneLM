@@ -42,7 +42,7 @@
     .stat span, .fact span { color: #9eafbd; font-size: .75rem; }
     .facts { margin-bottom: 16px; }
     pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 ui-monospace, monospace; }
-    #prompt, #compose-prompt, .prose { white-space: pre-wrap; }
+    #prompt, #compose-prompt, .prose { white-space: pre-wrap; overflow-wrap: anywhere; }
     ol, ul { margin: 0; padding-left: 1.2rem; } li + li { margin-top: 6px; }
     details summary { cursor: pointer; color: #b8ccda; margin-bottom: 8px; }
     iframe { width: 100%; height: 450px; border: 1px solid #435463; border-radius: 8px; }
@@ -53,10 +53,11 @@
 <body>
   <header>
     <h1>TuneLM dataset listener</h1>
-    <p class="hint">Compose asks a teacher model on this machine. Load reads JSONL that stays in your browser. Playback sends only the selected code to strudel.cc.</p>
+    <p class="hint">Compose asks a teacher model. SFT inference sends a listener prompt to Modal. Load reads local JSONL. Playback sends the selected code to strudel.cc.</p>
   </header>
   <div class="tabs" role="tablist">
     <button id="tab-compose" type="button" role="tab" aria-selected="true" aria-controls="panel-compose">Compose</button>
+    <button id="tab-predict" type="button" role="tab" aria-selected="false" aria-controls="panel-predict">SFT inference</button>
     <button id="tab-load" type="button" role="tab" aria-selected="false" aria-controls="panel-load">Load</button>
   </div>
 
@@ -102,6 +103,37 @@
       <section class="card"><h2>Thinking</h2><div id="compose-decisions" class="prose"></div></section>
       <section class="card"><h2>Feedback</h2><div id="compose-feedback"></div></section>
       <details class="card"><summary>Plan and retrieval context</summary><pre id="compose-context"></pre></details>
+    </article>
+  </section>
+
+  <section id="panel-predict" role="tabpanel" aria-labelledby="tab-predict" hidden>
+    <form id="predict-form" class="card">
+      <label for="predict-prompt">Listener request</label>
+      <textarea id="predict-prompt" placeholder="A loose swing between bass and drums" required></textarea>
+      <button id="predict-send" type="submit">Generate Strudel</button>
+    </form>
+    <div id="predict-status" class="status" data-kind="idle" role="status" aria-live="polite">
+      <span id="predict-spinner" class="spinner" hidden></span>
+      <div>
+        <strong id="predict-status-text">Ready.</strong>
+        <p id="predict-status-detail" class="hint">Uses the checkpoint configured in the deployed Modal app.</p>
+      </div>
+    </div>
+    <article id="predict-result" hidden>
+      <section class="card">
+        <h2>Prediction</h2>
+        <p id="predict-model" class="hint prose"></p>
+        <p id="predict-request" class="prose"></p>
+        <div id="predict-usage" class="stats"></div>
+      </section>
+      <section id="predict-listen" class="card" hidden>
+        <h2>Listen</h2>
+        <div class="toolbar"><button id="predict-play" type="button">Load Strudel player</button><button id="predict-stop" type="button" disabled>Stop / close player</button></div>
+        <div id="predict-player"></div>
+      </section>
+      <section id="predict-code-card" class="card" hidden><h2>Strudel code</h2><pre id="predict-code"></pre></section>
+      <section id="predict-thinking-card" class="card" hidden><h2>Thinking</h2><div id="predict-thinking" class="prose"></div></section>
+      <details id="predict-raw-card" class="card"><summary>Raw completion</summary><pre id="predict-raw"></pre></details>
     </article>
   </section>
 
@@ -188,12 +220,13 @@
     }
 
     function showTab(name) {
-      for (const tab of ['compose', 'load']) {
+      for (const tab of ['compose', 'predict', 'load']) {
         byId(`tab-${tab}`).setAttribute('aria-selected', String(tab === name));
         byId(`panel-${tab}`).hidden = tab !== name;
       }
       clearPlayer('player', 'stop');
       clearPlayer('compose-player', 'compose-stop');
+      clearPlayer('predict-player', 'predict-stop');
     }
 
     function usageStats(usage) {
@@ -272,12 +305,12 @@
       element.append(list);
     }
 
-    function setComposeStatus(kind, title, detail) {
-      const box = byId('compose-status');
+    function setStatus(view, kind, title, detail) {
+      const box = byId(`${view}-status`);
       box.dataset.kind = kind;
-      byId('compose-spinner').hidden = kind !== 'working';
-      byId('compose-status-text').textContent = title;
-      byId('compose-status-detail').textContent = detail;
+      byId(`${view}-spinner`).hidden = kind !== 'working';
+      byId(`${view}-status-text`).textContent = title;
+      byId(`${view}-status-detail`).textContent = detail;
     }
 
     async function openFiles(files) {
@@ -434,12 +467,27 @@
       clearPlayer('compose-player', 'compose-stop');
     }
 
+    async function postQuery(path, request) {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      let payload;
+      try { payload = await response.json(); }
+      catch {
+        throw new Error('Start the local viewer with .venv/bin/tunelm view, then open the URL it prints.');
+      }
+      if (!response.ok) throw new Error(payload.error || 'Query failed');
+      return payload;
+    }
+
     async function askModel() {
       const prompt = byId('query-prompt').value.trim();
       const model = byId('query-model').value.trim();
       const provider = byId('query-provider').value;
       if (!prompt || !model) {
-        setComposeStatus('error', 'Missing model or prompt.', 'Type a model id and a listener request, then click Compose.');
+        setStatus('compose', 'error', 'Missing model or prompt.', 'Type a model id and a listener request, then click Compose.');
         return;
       }
       const button = byId('query-send');
@@ -450,32 +498,21 @@
       const started = Date.now();
       const tick = () => {
         const seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
-        setComposeStatus('working', `Composing with ${provider} · ${model} · ${seconds}s`,
+        setStatus('compose', 'working', `Composing with ${provider} · ${model} · ${seconds}s`,
           'Using the same teacher path as tunelm generate, including a retry when a check fails. The first compose also loads the local tokenizer.');
       };
       tick();
       composeTimer = window.setInterval(tick, 1000);
       try {
-        const response = await fetch('/api/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider, model, prompt }),
-        });
-        const body = await response.text();
-        let payload;
-        try { payload = JSON.parse(body); }
-        catch {
-          throw new Error('This page is a static file server. Stop it and run .venv/bin/tunelm view, then open http://127.0.0.1:8765/.');
-        }
-        if (!response.ok) throw new Error(payload.error || 'Query failed');
+        const payload = await postQuery('/api/query', { provider, model, prompt });
         const seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
         const feedback = Array.isArray(payload.feedback) ? payload.feedback.length : 0;
-        setComposeStatus('done', `Finished in ${seconds}s.`,
+        setStatus('compose', 'done', `Finished in ${seconds}s.`,
           feedback ? `${feedback} check${feedback === 1 ? '' : 's'} reported. The reply is below and was not saved.` : 'The reply passed the local checks and was not saved.');
         showComposeResult(payload);
       } catch (error) {
         const offline = location.protocol === 'file:';
-        setComposeStatus('error', 'Compose failed.', offline
+        setStatus('compose', 'error', 'Compose failed.', offline
           ? 'Open this page with .venv/bin/tunelm view so a query can run.'
           : error.message);
       } finally {
@@ -485,9 +522,61 @@
       }
     }
 
+    function showPrediction(payload) {
+      const hasCode = Boolean(payload.code);
+      byId('predict-model').textContent = payload.model;
+      byId('predict-request').textContent = payload.prompt;
+      byId('predict-listen').hidden = !hasCode;
+      byId('predict-code-card').hidden = !hasCode;
+      byId('predict-thinking-card').hidden = !payload.summary;
+      byId('predict-code').textContent = payload.code ?? '';
+      byId('predict-thinking').textContent = payload.summary ?? '';
+      byId('predict-raw').textContent = payload.completion;
+      byId('predict-raw-card').open = Boolean(payload.parse_error);
+      renderUsage(byId('predict-usage'), null, payload.usage);
+      byId('predict-result').hidden = false;
+    }
+
+    async function askSFT(event) {
+      event.preventDefault();
+      const prompt = byId('predict-prompt').value.trim();
+      const button = byId('predict-send');
+      if (button.disabled) return;
+      if (!prompt) {
+        setStatus('predict', 'error', 'Enter a listener request.', '');
+        return;
+      }
+      button.disabled = true;
+      byId('predict-result').hidden = true;
+      clearPlayer('predict-player', 'predict-stop');
+      const started = Date.now();
+      const elapsed = () => Math.round((Date.now() - started) / 1000);
+      const tick = () => setStatus('predict', 'working', `Generating on Modal · ${elapsed()}s`,
+        'A cold start may need to download and load the model.');
+      tick();
+      const timer = window.setInterval(tick, 1000);
+      try {
+        const payload = await postQuery('/api/predict', { prompt });
+        showPrediction(payload);
+        if (payload.parse_error) {
+          setStatus('predict', 'error', 'The completion did not match the TuneLM format.', payload.parse_error);
+        } else {
+          setStatus('predict', 'done', `Finished in ${elapsed()}s.`, '');
+        }
+      } catch (error) {
+        setStatus('predict', 'error', 'SFT inference failed.', location.protocol === 'file:'
+          ? 'Open the page using .venv/bin/tunelm view.' : error.message);
+      } finally {
+        window.clearInterval(timer);
+        button.disabled = false;
+      }
+    }
+
     byId('tab-compose').onclick = () => showTab('compose');
+    byId('tab-predict').onclick = () => showTab('predict');
     byId('tab-load').onclick = () => showTab('load');
     byId('query-send').onclick = askModel;
+    byId('predict-form').onsubmit = askSFT;
     for (const button of document.querySelectorAll('[data-prompt]')) {
       button.onclick = () => { byId('query-prompt').value = button.dataset.prompt; byId('query-prompt').focus(); };
     }
@@ -502,6 +591,8 @@
     byId('stop').onclick = () => clearPlayer('player', 'stop');
     byId('compose-play').onclick = () => mountPlayer('compose-player', 'compose-stop', composeCode);
     byId('compose-stop').onclick = () => clearPlayer('compose-player', 'compose-stop');
+    byId('predict-play').onclick = () => mountPlayer('predict-player', 'predict-stop', byId('predict-code').textContent);
+    byId('predict-stop').onclick = () => clearPlayer('predict-player', 'predict-stop');
     byId('drop').ondragover = (event) => { event.preventDefault(); byId('drop').classList.add('active'); };
     byId('drop').ondragleave = () => byId('drop').classList.remove('active');
     byId('drop').ondrop = (event) => {

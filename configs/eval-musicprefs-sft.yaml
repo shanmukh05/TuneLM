@@ -1,0 +1,19 @@
+schema_version: 2
+benchmark: datasets/audio-benchmarks/musicprefs
+output: results/audio-eval/musicprefs-comparison-5s
+device: auto
+seconds: 5
+mad_reference: datasets/audio-benchmarks/fma-pop
+embedding_cache: results/audio-eval/embeddings
+match_rendered: true
+experiments:
+  - audioldm2
+  - musicgen_large
+  - musicgen_medium
+  - musicgen_small
+  - musicldm
+  - riffusion_v1
+  - stable_audio_open
+  - tunelm-sft-song-describer-20261115-1151
+  - name: tunelm-grpo-step150
+    audio_dir: datasets/audio-benchmarks/musicprefs-grpo-step150-10s/audio/tunelm-grpo-step150

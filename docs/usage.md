@@ -17,7 +17,8 @@ The current pipeline starts with independent listener requests, not source songs
 3. SFT: run `generate` (`configs/samples-sft.yaml`) to compose original answers.
    The composer returns its own plan, prose musical thinking, and executable
    Strudel code. It cannot rewrite the input request. Retrieved examples are
-   optional reference material. `generate` reads only the SFT bank.
+   optional reference material. `generate` reads only the SFT bank. Models listed
+   in the config run at the same time, one worker each.
 4. RL: run `export-rl` to turn the RL bank into answer-free GRPO tasks. No teacher
    composition, tokenizer, or memory is needed. They are distinct requests, not
    copies derived from accepted SFT rows.
@@ -34,7 +35,7 @@ tunelm generate
 # RL
 tunelm create-prompts --config configs/prompts-rl.yaml
 # Review datasets/prompts/generated/rl/*.jsonl, then:
-tunelm export-rl        # datasets/creative/rl/{train,val,benchmark}.jsonl
+tunelm export-rl        # datasets/samples/generated/rl/{train,val,benchmark}.jsonl
 ```
 
 Both banks share `datasets/prompts/generated`, so a request never repeats across
@@ -68,7 +69,7 @@ tunelm --help
 ```
 
 On the future Vast.ai host, install the appropriate CUDA PyTorch build first.
-Training library pins are in `pyproject.toml`: Transformers 5.12.1, TRL 1.12.0,
+Training library pins are in `pyproject.toml`: Transformers 5.20.2, TRL 1.12.0,
 PEFT 0.20.0, datasets 5.0.1, accelerate 1.12.0. GPU memory requirements and CUDA
 compatibility have not been measured. No instance has been selected or launched.
 The initial training runner uses one CUDA process; distributed/DDP launch is
@@ -170,7 +171,7 @@ Ingestion writes `datasets/sources/compositions.jsonl`,
 `results/ingestion/`. The index lives in `datasets/memory/`. Reingesting is a
 corpus rebuild; include all desired sources in the manifest. Family split
 assignments already recorded in `datasets/sources/splits.json` cannot silently
-change. Accepted license identifiers are listed in `corpus.py`.
+change. Accepted license identifiers are listed in `src/tunelm/data/corpus.py`.
 
 ```bash
 tunelm plan 'A 120 BPM groove in C minor with drums, bass and pad' \
@@ -228,9 +229,9 @@ to a prompt that already has one. Changing the model mix or reference snapshot
 still requires a new run ID, and that new run keeps the answers already saved.
 One writer per run is enforced.
 
-Production exports are `datasets/creative/sft/{train,val}.jsonl` and
-`datasets/creative/evaluation/benchmark.jsonl` from `generate`, and
-`datasets/creative/rl/{train,val,benchmark}.jsonl` from `export-rl`. Warmup, SFT, and GRPO configs point
+Production exports are `datasets/samples/generated/sft/{train,val}.jsonl` and
+`datasets/samples/generated/evaluation/benchmark.jsonl` from `generate`, and
+`datasets/samples/generated/rl/{train,val,benchmark}.jsonl` from `export-rl`. SFT and GRPO configs point
 to these paths. LFM training sends the listener request, so the training host does
 not need the teacher reference index. SFT/validation inputs must have distinct IDs and exact prompt text;
 sharing optional reference examples is not source-target leakage.
@@ -249,6 +250,9 @@ into the training files. The first query loads the cached tokenizer. Prompt bank
 have no answer to play; accepted compositions do. Playback uses the official
 Strudel editor and requires internet for the runtime and audio assets.
 
+Use the **SFT inference** tab to try the fine-tuned model with a listener request.
+See [Live SFT inference on Modal](#live-sft-inference-on-modal) for setup.
+
 Each author call is shown a random sample of requests already accepted, capped by
 `avoid_sample` in the prompt config. Below that cap the call sees the whole bank.
 The same `run_id` resumes after the author wording or palette changes. A different
@@ -257,12 +261,16 @@ there, and the runs can write at the same time.
 
 ## SFT, then GRPO on Vast.ai
 
-Run these only after corpus/generation review and transfer of the frozen memory
-and dataset snapshots to the CUDA host. Each stage is required.
+`datasets/` and `.env.local` are gitignored, so copy them to the CUDA host next to
+the checkout. Training needs only `datasets/samples/generated/{sft,rl}`; rows are
+prompt-first, so no memory index is read. Node 22+ and `npm ci` are required on
+the host because the GRPO reward and both benchmarks run the Strudel verifier. `HF_TOKEN` must be
+set (in `.env.local` or the shell) because both stage configs upload to the Hub.
 
 ```bash
-tunelm train-sft --config configs/sft-warmup.yaml --dry-run --tokenize
-tunelm train-sft --config configs/sft-warmup.yaml
+# On the Vast.ai host, from the repo root:
+pip install -e '.[train]' && npm ci
+rsync -a <local>:TuneLM/datasets/samples/generated/ datasets/samples/generated/
 
 tunelm train-sft --config configs/sft.yaml --dry-run --tokenize
 tunelm train-sft --config configs/sft.yaml
@@ -282,13 +290,24 @@ Start the first GPU run with a copied config using a small `max_steps` and
 frequent `save_steps`/`eval_steps`, before the full schedule. Both SFT and GRPO
 GPU behavior remains unverified; this is the first required hardware check.
 
-Full SFT continues `checkpoints/lfm3-warmup`. GRPO requires
-`checkpoints/lfm3-sft`, creates `checkpoints/lfm3-sft-merged`, then saves its fresh
-adapter to `checkpoints/lfm3-grpo`. Preserve the merged base and the RL adapter.
+SFT trains a fresh LoRA adapter into `checkpoints/lfm3-sft`. GRPO loads the
+merged SFT model named by `merged_sft`. A Hugging Face repo id is used directly.
+A local adapter in `sft_checkpoint` is still merged into a local `merged_sft`
+directory. The fresh RL adapter is saved to `checkpoints/lfm3-grpo`.
 When `hub` is set, the stage also merges the LoRA into the full weights and uploads
 `best` and `last` to Hugging Face. The name pattern lives in the stage config.
 `train-sft` and `train-grpo` read `HF_TOKEN` from `--env-file` (default `.env.local`).
-Reward/component/diagnostic traces are JSONL under `results/lfm3-grpo/`.
+When the run finishes, each stage generates and scores its benchmark before
+returning: SFT uses `datasets/samples/generated/evaluation/benchmark.jsonl` (100
+tasks, plan-based score) and GRPO uses `datasets/samples/generated/rl/benchmark.jsonl`
+(134 tasks, the contract reward). Results land in `<results_dir>/benchmark/`.
+`viewer.jsonl` there has one training-shaped record per completion, which the
+dataset viewer loads directly.
+Set `benchmark_file: ""` to skip. The upload happens first, so a benchmark failure
+still leaves the merged checkpoint on the Hub and the adapter in `output_dir`.
+Both stages log to the Weights & Biases project `tunelm` (`run_name` `lfm3-sft` and
+`lfm3-grpo`). `WANDB_API_KEY` is read from `--env-file`. Reward traces are also
+JSONL under `results/lfm3-grpo/`.
 
 ```bash
 tunelm train-grpo --config configs/grpo.yaml --resume
@@ -296,14 +315,62 @@ tunelm train-grpo --config configs/grpo.yaml --resume
 
 Resume uses the last native trainer checkpoint, or an explicit checkpoint path
 after `--resume`. Configuration, data, and memory identities must match the
-original run. Native periodic checkpoints include optimizer/RNG state; the final
+original run. A resume may raise `num_train_epochs`; any other change needs a
+new output directory. Native periodic checkpoints include optimizer/RNG state; the final
 adapter is also usable for inference. A run shorter than the configured save
 interval may have no periodic checkpoint to resume. Choose a new output directory
 for a deliberately changed training run.
 
 ## Inference and evaluation
 
-These commands load model weights and generate music; they have not run here.
+### Live SFT inference on Modal
+
+From the repository root, activate the project environment and install the Modal
+client. Run `modal setup` if you still need to connect a Modal profile.
+
+```bash
+source .venv/bin/activate
+pip install -e '.[modal]'
+```
+
+[The inference config](../configs/inference.yaml) defaults to
+`tensorfiend/tunelm-v2-lfm3-1.7B-sft-song-describer-best-20261115-1151`. For a private or gated
+checkpoint, set `hf_secret` to the name of a secret in the deployment's Modal
+environment. The default is `tunelm`. The secret must contain `HF_TOKEN` with
+read access to the checkpoint. For a public checkpoint, set `hf_secret: null`.
+
+Deploy the Modal app first, then start the local viewer using the same Modal
+profile and environment.
+
+```bash
+modal deploy scripts/modal_inference.py
+tunelm view
+```
+
+Open [the local viewer](http://127.0.0.1:8765/), choose **SFT inference**, and
+submit a listener request. The tab shows the model ID, token counts, musical
+reasoning, parsed Strudel code, and raw completion. Select **Load Strudel player**
+to hear a parsed result. If parsing fails, the tab opens the raw completion for
+inspection. The first request can take longer while Modal provisions a GPU and
+loads the checkpoint. The default GPU order is L4, then A10.
+
+To switch checkpoints, edit `model` and `revision` in the inference config and
+rerun `modal deploy scripts/modal_inference.py`. Set `TUNELM_INFERENCE_CONFIG`
+before deployment to use another YAML file. If you deploy under a different
+app name, pass it to `tunelm view --modal-app`.
+
+### MusicPrefs audio evaluation
+
+Use `tunelm evaluate-audio --config configs/eval-musicprefs-sft.yaml` to score
+the saved experiments listed in the YAML. Use `scripts/generate_provider_audio.py`
+to save WAVs from an LLM provider and `tunelm score-audio` to score an existing
+CSV. See [MusicPrefs audio evaluation](audio-evaluation.md) for commands and the
+shared FMA-Pop embeddings.
+
+### Local inference and symbolic benchmark evaluation
+
+Use `infer` and `predict` to generate locally. Use `evaluate` to score saved
+predictions.
 
 ```bash
 tunelm infer 'A 120 BPM groove in C minor with bass and drums' \
@@ -319,7 +386,8 @@ tunelm evaluate --predictions results/benchmark-grpo/predictions.jsonl \
 ```
 
 Omit `--checkpoint` on `predict` for the pinned base model. Use the same frozen
-benchmark/context across base, SFT, and GRPO. `evaluate` only scores saved JSONL;
-it reports missing/extra IDs and writes per-task scores plus a JSON summary.
+benchmark/context across base, SFT, and GRPO. `predict` writes `viewer.jsonl` beside the predictions. `evaluate` only scores
+saved JSONL; it reports missing/extra IDs, writes per-task scores plus a JSON
+summary, and refreshes that same `viewer.jsonl`.
 Copy valid Strudel into the Strudel REPL for listening and record human ratings
 separately. Automated reward is not a substitute for audibility or musical review.

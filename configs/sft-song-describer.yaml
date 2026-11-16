@@ -1,0 +1,40 @@
+schema_version: 2
+stage: sft
+model:
+  name: tensorfiend/tunelm-v2-lfm3-1.7B-sft-best-20261113-0623
+  revision: 174acca2eda4bb0e218b2f5d955949de058ea4dc
+  dtype: bfloat16
+  max_length: 6144
+  trust_remote_code: true
+  attention: sdpa
+hub:
+  org: tensorfiend
+  model: lfm3-1.7B
+  repo: tunelm-v2-{model}-{stage}-{which}-{time}
+  stage: sft-song-describer
+  private: true
+  metric: eval_loss
+  greater_is_better: false
+train_file: datasets/samples/song-describer/sft/train.jsonl
+val_file: datasets/samples/song-describer/sft/val.jsonl
+benchmark_file: datasets/samples/song-describer/evaluation/benchmark.jsonl
+output_dir: checkpoints/lfm3-sft-song-describer
+results_dir: results/lfm3-sft-song-describer
+training:
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 0.00005
+  warmup_steps: 5
+  bf16: true
+  gradient_checkpointing: true
+  eval_strategy: steps
+  eval_steps: 50
+  save_strategy: steps
+  save_steps: 50
+  logging_steps: 5
+  save_total_limit: 2
+  report_to: wandb
+  run_name: lfm3-sft-song-describer
+  seed: 42

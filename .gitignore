@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 *.py[cod]
 node_modules/
+/dist/
 /contents_v1/
 /checkpoints/
 /results/

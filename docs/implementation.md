@@ -1,8 +1,7 @@
 # TuneLM implementation
 
-Implemented 2026-11-06 for `LiquidAI/LFM3-1.7B-Base`. Both supervised fine-tuning
-and GRPO reinforcement learning are implemented. Earlier teacher pilots ran; the prompt-first redesign was checked locally without
-new paid calls. GPU training, model inference, and Vast.ai jobs remain unrun.
+TuneLM uses `LiquidAI/LFM3-1.7B-Base` for supervised fine-tuning and GRPO.
+The current merged SFT checkpoint is configured in `configs/inference.yaml`.
 
 ## Flow and ownership
 
@@ -12,23 +11,24 @@ SFT requests → original composition + optional references → executable answe
 RL requests → frozen answer-free tasks. Both feed the existing SFT/GRPO stages.
 Source collection and memory are optional reference-library branches.
 
-| Module | Owns |
+| Path | Owns |
 | --- | --- |
-| `schemas.py`, `io.py` | Versioned records, safe YAML configs, strict JSON data, atomic files, append journals, run locks, archive write protection |
-| `verifier/ast.mjs` | Accepted JS subset, `$:` normalization, dependencies, extraction, literal-scale transposition, bounded arrangement spans |
-| `verifier/runtime.mjs`, `verifier.py` | Native Strudel Haps, process deadlines, heap/event/output limits, catalog checking |
-| `telemetry.py` | Onset counts, pitches/register, syncopation, structural/control fingerprints |
-| `corpus.py` | Source/license manifests, stable family splits, seed and stem verification |
-| `scripts/collect_seeds.py`, `scripts/extract_seed_objects.mjs` | Source allowlist, pinned downloads/cache, literal extraction, provenance, deduplication, optional ingestion |
-| `memory.py`, `planner.py` | SQLite/NumPy indexes, embeddings, metadata filtering, ranking, typed plans, bounded XML context |
-| `prompt_generation.py`, `prompting.py` | Independent resumable SFT/RL request banks, author quotas, styles, reviewable JSONL |
-| `synthesis.py`, `generation_state.py`, `responses.py`, `teachers.py` | Original composition for fixed requests, optional references, independent RL exports, retries, native structured provider adapters |
-| `training.py`, `rewards.py` | Completion-masked SFT, SFT-to-GRPO handoff, reward components, checkpoint/resume, preflight |
-| `inference.py`, `cli.py` | Explicit commands, prediction journals, offline scoring, missing/extra-ID reporting |
+| `src/tunelm/core/` | Versioned schemas, configuration, atomic writes, and generation journals |
+| `src/tunelm/composition/` | Stem retrieval, typed plans, bounded prompt context, and the Strudel response contract |
+| `src/tunelm/data/` | Corpus ingestion, prompt authoring, native teacher adapters, resumable answer generation, and RL task export |
+| `src/tunelm/strudel/` | Python verifier client, sound catalog checks, and telemetry extracted from Strudel events |
+| `src/tunelm/model/` | SFT and GRPO, model loading, inference, symbolic rewards, and checkpoint publishing |
+| `src/tunelm/evaluation/` | Benchmark prompt roster, saved audio, reference embeddings, and prompt-to-music metrics |
+| `src/tunelm/interface/` | `tunelm` CLI entry point and local dataset viewer |
+| `verifier/` | Native Strudel execution, AST validation, and code extraction and transposition |
+| `scripts/collect_seeds.py`, `scripts/extract_seed_objects.mjs` | Pinned source collection and literal extraction |
+| `scripts/generate_provider_audio.py`, `scripts/generate_benchmark_audio.py`, `scripts/render_benchmark_audio.mjs` | Provider and checkpoint inference with saved completions, plus offline Strudel Web Audio rendering |
+| `scripts/modal_inference.py` | Optional live SFT deployment used by the dataset viewer |
 
-These are intentionally ordinary Python modules, rather than many subpackages.
-All paths are relative to the repository root, and output helpers reject
-destinations resolving into `archive/`.
+Configuration and output paths resolve from the repository root. Output helpers reject
+destinations resolving into `contents_v1/`. Audio CSV paths resolve from the input
+CSV directory. The [audio evaluator](audio-evaluation.md) runs independently of
+the symbolic benchmark and uses a separate Python environment for metric models.
 
 ## Verification boundary
 
@@ -140,8 +140,9 @@ compatibility need.
 SFT tokenizes the complete checkpoint template and requires an exact prompt token
 prefix. It masks that prefix with -100 and rejects overlength examples. The
 generation prompt already opens `<think>`; there is no duplicate tag or empty
-thinking prefill. Warmup uses atomic or small layered examples without requiring retrieval matches; full SFT continues
-the warmup adapter. GRPO merges and saves SFT first, then trains a new adapter on
+thinking prefill. SFT trains a fresh LoRA adapter on the full SFT bank; the
+optional `curriculum: warmup` filter and `adapter` continuation have no config
+now. GRPO merges and saves SFT first, then trains a new adapter on
 that saved base. With nonzero KL, disabling the new adapter exposes the SFT policy.
 Retain the merged base with the RL adapter when transferring artifacts.
 

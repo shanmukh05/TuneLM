@@ -7,20 +7,25 @@ hub:
   private: true
   metric: reward
   greater_is_better: true
-train_file: datasets/creative/rl/train.jsonl
-val_file: datasets/creative/rl/val.jsonl
+# Written by `tunelm export-rl` from datasets/prompts/generated/rl.
+train_file: datasets/samples/generated/rl/train.jsonl
+val_file: datasets/samples/generated/rl/val.jsonl
 output_dir: checkpoints/lfm3-grpo
 results_dir: results/lfm3-grpo
 memory_dir: datasets/memory
-sft_checkpoint: checkpoints/lfm3-sft
-merged_sft: checkpoints/lfm3-sft-merged
+sft_checkpoint: tensorfiend/tunelm-v2-lfm3-1.7B-sft-best-20261113-0623
+merged_sft: tensorfiend/tunelm-v2-lfm3-1.7B-sft-best-20261113-0623
 training:
   num_train_epochs: 1
-  per_device_train_batch_size: 1
-  gradient_accumulation_steps: 4
-  generation_batch_size: 4
+  # TRL batch sizes count completions. 2 prompts x 4 generations, accumulated
+  # 8 times, is the same 64-completion update that 4 x 4 no longer fit in 24 GB.
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+  generation_batch_size: 8
   num_generations: 4
-  max_completion_length: 1536
+  # SFT teacher completions: p50 ~1k, p90 ~1.9k, p99 ~2.9k tokens. A tighter cap
+  # truncates (zero reward, masked) a large share and mostly teaches "be shorter".
+  max_completion_length: 3072
   learning_rate: 5.0e-06
   temperature: 0.8
   beta: 0.02
@@ -29,7 +34,10 @@ training:
   mask_truncated_completions: true
   use_vllm: false
   save_steps: 25
-  logging_steps: 1
+  # TRL averages metrics over the logging window; matching save_steps makes the
+  # hub "best" pick a 25-step mean reward. Per-rollout rewards are in results_dir.
+  logging_steps: 25
+  report_to: wandb
+  run_name: lfm3-grpo
   save_total_limit: 2
-  report_to: none
   seed: 42

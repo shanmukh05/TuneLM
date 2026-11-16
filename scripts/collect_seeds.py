@@ -1,7 +1,7 @@
 """Collect pinned, explicitly licensed Strudel sources into a JSONL manifest.
 
 Downloads are temporary; parsed JSONL and license notices support offline reruns.
-Use --ingest to verify compositions and extract stems through tunelm.corpus;
+Use --ingest to verify compositions and extract stems through tunelm.data.corpus;
 this script never calls teacher APIs, builds memory, or changes archive/.
 """
 
@@ -25,8 +25,7 @@ from urllib.parse import quote
 
 from pydantic import Field, field_validator
 
-from tunelm.corpus import LICENSES, ingest
-from tunelm.io import (
+from tunelm.core.io import (
     ROOT,
     content_hash,
     load_config,
@@ -37,7 +36,8 @@ from tunelm.io import (
     write_json,
     write_jsonl,
 )
-from tunelm.schemas import Record, Source
+from tunelm.core.schemas import Record, Source
+from tunelm.data.corpus import LICENSES, ingest
 
 LOG = logging.getLogger("collect_seeds")
 MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -130,7 +130,7 @@ def fetch_file(repo: Repository, spec: RemoteFile, workspace: Path) -> Path:
     text = raw.decode("utf-8")
     if not path.exists():
         # Reuse the atomic writer, preserving the reviewed source bytes exactly.
-        from tunelm.io import _atomic_text
+        from tunelm.core.io import _atomic_text
 
         _atomic_text(path, text)
     return path
@@ -145,7 +145,7 @@ def license_evidence(repo: Repository, directory: Path, workspace: Path) -> list
             "sha256": spec.sha256,
         }
         if spec.retain_notice:
-            from tunelm.io import _atomic_text
+            from tunelm.core.io import _atomic_text
 
             notice = directory / "licenses" / repo.repo / repo.revision / spec.path
             _atomic_text(notice, path.read_text(encoding="utf-8"))

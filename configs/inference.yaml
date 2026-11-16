@@ -1,0 +1,9 @@
+schema_version: 2
+model: tensorfiend/tunelm-v2-lfm3-1.7B-grpo-step250
+revision: b34fef426e5864617c9ebabff424668f8303819d
+gpu: [L4, A10]
+hf_secret: tunelm  # Modal secret containing a read token for the private checkpoint.
+trust_remote_code: true  # LFM3 uses model code from the selected repository.
+max_length: 6144
+max_new_tokens: 3072
+temperature: 0.0

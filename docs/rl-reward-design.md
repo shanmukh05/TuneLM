@@ -152,7 +152,7 @@ RL should fix. Recheck these rates on the real contract bank before training
 RL needs **requests and contracts only**. No teacher answers, plans, or reasoning
 are generated for RL. Each row is a `MusicRequest` with `stage: rl` and a
 `contract`. `tunelm export-rl` turns those rows into answer-free `Task` rows that
-keep the contract. RL authoring and export live in `src/tunelm/rl_prompts.py`;
+keep the contract. RL authoring and export live in `src/tunelm/data/rl_prompts.py`;
 SFT answer generation never reads the RL bank.
 
 | Split | Count | Used for |
@@ -161,8 +161,8 @@ SFT answer generation never reads the RL bank.
 | val | 150 | reward tracking during training |
 | benchmark | 150 | base, SFT, and GRPO comparison, plus listening |
 
-With 4 generations and 4 prompts per optimizer step, 2,000 prompts make one
-500-step epoch, or 8,000 rollouts. Expect about 10–20% of authoring attempts to be
+With 4 generations and 4 prompts per optimizer step, the 1,764 exported train
+prompts make one 441-step epoch, or 7,056 rollouts. Expect about 10–20% of authoring attempts to be
 rejected by the contract check and retried. 1,500 train prompts is a reasonable
 floor. Prefer more distinct prompts over a second epoch.
 
@@ -201,7 +201,7 @@ it can be checked.
 tunelm create-prompts --config configs/prompts-rl.yaml --dry-run
 tunelm create-prompts --config configs/prompts-rl.yaml
 # Review datasets/prompts/generated/rl/*.jsonl: read about 50 contracts.
-tunelm export-rl                      # datasets/creative/rl/{train,val,benchmark}.jsonl
+tunelm export-rl                      # datasets/samples/generated/rl/{train,val,benchmark}.jsonl
 tunelm train-grpo --config configs/grpo.yaml --dry-run --tokenize
 ```
 
@@ -227,13 +227,16 @@ Delete bad rows rather than editing them. The author refuses edited JSONL.
 
 - Keep `num_generations: 4`. Four is enough once saturated prompts are removed.
   Keep TRL's default `loss_type: dapo` and a small `beta`, as now.
-- The current config trains 1 prompt per optimizer step:
-  `per_device_train_batch_size: 1`, `gradient_accumulation_steps: 4`, and
-  `generation_batch_size: 4`. For steadier steps, use 4 prompts per step:
-  per-device 4, accumulation 4, and generation batch 16. This depends on GPU
-  memory, which has not been measured.
+- The config trains 4 prompts per optimizer step: per-device 4, accumulation 4,
+  and generation batch 16 (TRL batch sizes count completions). If GPU memory is
+  short, use per-device 2 and accumulation 8; the step stays the same size.
+- `max_completion_length: 3072`. SFT teacher completions run p50 about 1,000,
+  p90 about 1,900, and p99 about 2,900 tokens. A 1,536 cap would truncate about
+  a fifth of post-SFT rollouts, which score zero and are masked.
+- `logging_steps` matches `save_steps` (25), because TRL averages metrics over
+  the logging window and the hub "best" checkpoint uses the logged `reward`.
 - One verify of a realistic SFT program takes about 0.24 s, or about 1 s per
-  group of 4. This is small next to generating up to 1,536 tokens.
+  group of 4. This is small next to generating up to 3,072 tokens.
 
 ## Monitoring
 
@@ -264,4 +267,4 @@ added, belongs here and not in the training reward.
   pass rates for the SFT policy. A check that the SFT model almost always passes
   adds little signal. A check it almost never passes, when the listener said it
   plainly, points to a measurement bug. The thresholds marked `ponytail:` in
-  `rewards.py` are first values, not tuned constants.
+  `src/tunelm/model/rewards.py` are first values, not tuned constants.

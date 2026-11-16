@@ -3,14 +3,27 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "engines": { "node": ">=22" },
-  "scripts": { "postinstall": "node verifier/patch-kabelsalat.mjs" },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "postinstall": "node verifier/patch-kabelsalat.mjs",
+    "build:web": "node web/build.mjs",
+    "dev:web": "npm run build:web && node --env-file-if-exists=.env.local web/preview.mjs"
+  },
   "dependencies": {
     "@strudel/core": "1.2.6",
     "@strudel/mini": "1.2.6",
+    "@strudel/soundfonts": "1.2.6",
     "@strudel/tonal": "1.2.6",
     "@strudel/transpiler": "1.2.6",
+    "@strudel/webaudio": "1.2.6",
     "acorn": "8.15.0",
-    "acorn-walk": "8.3.4"
+    "acorn-walk": "8.3.4",
+    "node-web-audio-api": "1.0.8",
+    "superdough": "1.2.6"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.2"
   }
 }

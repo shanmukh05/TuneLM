@@ -1,0 +1,30 @@
+# Generate original Strudel for all 1,106 Song Describer captions.
+schema_version: 2
+progress: true
+save_every: 10
+run_id: song-describer-sft-full-02
+prompts_dir: datasets/prompts/song-describer
+dataset_dir: datasets/samples/song-describer
+references: optional
+memory_dir: datasets/memory
+context_tokens: 16384
+max_attempts: 3
+models:
+  - id: gemini-argon
+    provider: gemini
+    model: gemini-4-argon
+    fraction: 0.4
+    max_tokens: 16384
+    thinking_level: low
+  - id: gemini-carbon
+    provider: gemini
+    model: gemini-4-carbon
+    fraction: 0.4
+    max_tokens: 16384
+    thinking_level: low
+  - id: gemini-hydrogen
+    provider: gemini
+    model: gemini-4-hydrogen
+    fraction: 0.2
+    max_tokens: 16384
+    thinking_level: low

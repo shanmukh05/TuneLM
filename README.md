@@ -5,13 +5,14 @@ memory and [`LiquidAI/LFM3-1.7B-Base`](https://huggingface.co/LiquidAI/LFM3-1.7B
 Runtime settings live in YAML under `configs/`; datasets remain plain JSONL.
 The implementation includes pinned licensed-source collection, ingestion, AST stem extraction,
 headless verification, independent prompt authoring, optional musical references, original composition with OpenAI,
-Gemini, Claude, DeepSeek, or OpenRouter, **SFT and GRPO RL**, inference, and offline evaluation.
+Gemini, Claude, DeepSeek, or OpenRouter, **SFT and GRPO RL**, inference, and
+symbolic and audio evaluation.
 
-**Status (2026-11-09): prompt-first SFT/RL data pipeline implemented locally.**
-Earlier Gemini pilots produced 13 accepted examples. The new author/composer split
-was checked with real pilot inputs and no new paid calls. GPU training, model
-inference, and Vast.ai jobs remain unrun; listening quality remains unverified.
-The LFM3 1.7B checkpoint is pinned by revision.
+**Status (2026-11-15): Song Describer SFT checkpoint available.** Its model
+and revision are configured in [`configs/inference.yaml`](configs/inference.yaml).
+The MusicPrefs benchmark imports reference generator outputs and fills missing
+TuneLM WAVs on demand. See the [evaluation configuration](configs/eval-musicprefs-sft.yaml)
+and [MusicPrefs setup](docs/audio-evaluation.md).
 
 The optional reference corpus has **516 compositions and 662 verified stems**.
 It is reference material, not a mandatory composition factory. Registry entries
@@ -27,6 +28,7 @@ are temporary. See [source research](docs/source-research.md) for per-source res
 | --- | --- |
 | [Usage](docs/usage.md) | Setup, corpus, generation, SFT/GRPO, inference, future Vast.ai run |
 | [Implementation](docs/implementation.md) | Actual architecture, limits, and design choices |
+| [MusicPrefs audio evaluation](docs/audio-evaluation.md) | Saved audio, automatic TuneLM rendering, and four metrics |
 | [Training I/O](docs/training-io.md) | JSON/JSONL, model contract, masking, and reward records |
 | [Verification](docs/verification.md) | Checks performed and what remains unrun |
 | [Data layout](datasets/README.md) | Canonical data and derived artifacts |
@@ -54,14 +56,13 @@ The complete two-stage run commands are in [Usage](docs/usage.md).
 Required training order:
 
 ```bash
-tunelm train-sft --config configs/sft-warmup.yaml
 tunelm train-sft --config configs/sft.yaml
 tunelm train-grpo --config configs/grpo.yaml
 ```
 
 These require reviewed teacher-generated data and a CUDA host. Add `--dry-run
---tokenize` to validate prerequisites without loading weights. No training jobs
-have been launched. `examples/seeds.jsonl` keeps the ten original starter inputs;
+--tokenize` to validate prerequisites without loading weights.
+`examples/seeds.jsonl` keeps the ten original starter inputs;
 the larger accepted collection is in `datasets/sources/compositions.jsonl` after
 running the collector. Its small held-out set is not a production quality benchmark.
 

@@ -7,17 +7,17 @@ hub:
   private: true
   metric: eval_loss
   greater_is_better: false
-adapter: checkpoints/lfm3-warmup
-train_file: datasets/creative/sft/train.jsonl
-val_file: datasets/creative/sft/val.jsonl
+train_file: datasets/samples/generated/sft/train.jsonl
+val_file: datasets/samples/generated/sft/val.jsonl
 output_dir: checkpoints/lfm3-sft
 results_dir: results/lfm3-sft
 training:
-  num_train_epochs: 2
+  num_train_epochs: 4
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   learning_rate: 0.0002
-  warmup_ratio: 0.05
+  # 25 steps warmed the original 504-step schedule. Extra epochs resume that run.
+  warmup_steps: 25
   bf16: true
   gradient_checkpointing: true
   eval_strategy: steps
@@ -25,5 +25,6 @@ training:
   save_steps: 50
   logging_steps: 5
   save_total_limit: 2
-  report_to: none
+  report_to: wandb
+  run_name: lfm3-sft
   seed: 42

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TuneLM turns music prompts into editable Strudel code that your browser runs to create audio.">
+  <meta name="theme-color" content="#f8f7f3">
+  <title>TuneLM · Compose with Strudel</title>
+  <link rel="icon" href="/tunelm/assets/tunelm-mark.svg" type="image/svg+xml" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/tunelm/assets/studio.css">
+  <script type="module" src="/tunelm/assets/studio.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <a class="brand" href="#overview" aria-label="TuneLM overview">
+        <img class="brand-mark" src="/tunelm/assets/tunelm-mark.svg" width="34" height="34" alt="">
+        <span>TuneLM</span>
+      </a>
+      <div class="page-tabs" role="tablist" aria-label="TuneLM">
+        <button id="overview-tab" type="button" role="tab" aria-selected="true" aria-controls="overview-page" data-view="overview">Overview</button>
+        <button id="try-tab" type="button" role="tab" aria-selected="false" aria-controls="try-page" tabindex="-1" data-view="try">Try TuneLM</button>
+      </div>
+      <div class="header-actions">
+        <nav class="links" aria-label="Project links">
+          <a href="https://www.tensorwrites.com/">Blog <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/shanmukh05/TuneLM">Repo <span aria-hidden="true">↗</span></a>
+          <a href="https://www.tensorwrites.com/about">Website <span aria-hidden="true">↗</span></a>
+        </nav>
+        <button id="new-session" class="new-session" type="button" title="New chat" hidden><span data-icon="plus"></span><span>New chat</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="overview-page" class="overview-page page-panel" role="tabpanel" aria-labelledby="overview-tab" tabindex="0">
+      <div class="overview-hero">
+        <div class="overview-copy">
+          <h1>Music, written<br><em>as code.</em></h1>
+          <p>Describe the music you want to hear. TuneLM generates editable Strudel code, and your browser runs it to create the audio. You can change the notes, rhythms, and instruments directly in the code.</p>
+          <a class="overview-cta" href="#try">Try TuneLM <span data-icon="arrow"></span></a>
+        </div>
+        <figure class="overview-example">
+          <figcaption class="code-bar">
+            <span>UK garage · 136 BPM</span>
+            <button class="example-play" type="button" hidden><span data-icon="play"></span><span>Play code</span></button>
+          </figcaption>
+          <pre tabindex="0" aria-label="Strudel code for the UK garage example"><code>setcpm(136 / 4)
+
+// Two-step drums with a swung kick and hats
+const kick = s(`&lt;[sbd ~ ~ sbd ~ ~ sbd ~]
+                [sbd ~ ~ sbd ~ sbd ~ ~]>`)
+  .swingBy(0.24, 4).freq(53).penv(26)
+  .pdecay(0.065).decay(0.17).gain(0.52)
+
+const snare = s("~ ~ pink ~ ~ ~ pink ~")
+  .hpf(950).lpf(7300).decay(0.09).sustain(0)
+  .gain(0.84)
+
+const hats = s("~ white ~ [white white] ~ white ~ white")
+  .swingBy(0.26, 4).hpf(7500).decay(0.035)
+  .sustain(0).gain(0.29)
+
+const drums = stack(kick, snare, hats)
+
+// Syncopated bass follows four chords
+const bass = note(`&lt;[f2 ~ ~ c3 ~ f2 f3 eb2]
+                   [db2 ~ ~ ab2 ~ db2 f2 ~]
+                   [ab1 ~ ~ eb2 ~ ab2 c3 ~]
+                   [eb2 ~ bb2 ~ ~ eb2 g2 c3]>`)
+  .swingBy(0.24, 4).s("square").lpf(460)
+  .lpenv(1.4).lpdecay(0.12).decay(0.14)
+  .sustain(0.22).release(0.07).gain(0.56)
+
+const harmony = note(`&lt;[ab3,c4,eb4,g4]
+                      [ab3,c4,db4,f4]
+                      [ab3,bb3,c4,eb4]
+                      [g3,bb3,c4,eb4]>`)
+
+const chords = harmony.struct("~ x ~ ~ x ~ ~ x")
+  .s("triangle").fm(0.55).fmh(2).decay(0.14)
+  .sustain(0.04).release(0.09).gain(0.28)
+
+// A bright four-bar hook with a quiet stereo echo
+const hook = note(`&lt;[~ c5 eb5 ~ g5 ~ f5 eb5]
+                   [~ c5 eb5 ~ ab5 ~ f5 c5]
+                   [~ c5 eb5 ~ g5 ~ c6 bb5]
+                   [~ bb4 c5 ~ eb5 ~ g5 ~]>`)
+  .s("triangle").fm(1.25).fmh(2).decay(0.11)
+  .sustain(0.12).release(0.08).gain(0.36)
+  .pan(0.42).off(3 / 16, p => p.gain(0.09).pan(0.76))
+
+const pad = harmony.s("sawtooth").lpf(950)
+  .attack(0.18).release(0.22).gain(0.10)
+
+// Full groove, a four-bar break, then back in
+arrange(
+  [8, stack(drums, bass, chords, hook)],
+  [4, stack(snare, hats, pad, hook)],
+  [4, stack(drums, bass, chords, hook, pad)]
+)</code></pre>
+          <p class="example-error" role="alert" hidden></p>
+        </figure>
+      </div>
+
+      <section class="workflow" aria-labelledby="workflow-title">
+        <h2 id="workflow-title">How TuneLM learns</h2>
+        <ol class="workflow-steps" role="list">
+          <li>
+            <div class="workflow-art" aria-hidden="true"></div>
+            <div class="workflow-copy">
+              <h3>Build the dataset</h3>
+              <p>Start with licensed Strudel examples. Build pairs of music descriptions and Strudel programs, then check that the code runs.</p>
+            </div>
+          </li>
+          <li>
+            <div class="workflow-art" aria-hidden="true"></div>
+            <div class="workflow-copy">
+              <h3>Supervised fine-tuning</h3>
+              <p>Fine-tune LFM3 on those pairs so it learns to translate music requests into code for notes, rhythms, and instruments.</p>
+            </div>
+          </li>
+          <li>
+            <div class="workflow-art" aria-hidden="true"></div>
+            <div class="workflow-copy">
+              <h3>Reinforcement learning (GRPO)</h3>
+              <p>Compare several candidate programs for each prompt. Use their relative scores to reward code that runs and meets the musical constraints.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+    </section>
+
+    <section id="try-page" class="main page-panel" role="tabpanel" aria-labelledby="try-tab" tabindex="0" hidden>
+      <section class="intro">
+        <h1>What should it <em>sound like?</em></h1>
+        <p>Describe the music you’re imagining. TuneLM turns it into playable Strudel.</p>
+      </section>
+
+      <div id="conversation" class="conversation" aria-label="Conversation" role="log"></div>
+
+      <div class="composer-wrap">
+        <div class="ideas" aria-label="Example prompts">
+          <button type="button" data-prompt="A mellow late-night house groove with a warm bassline, dusty drums and soft keys."><span class="idea-icon dusk" data-icon="moon"></span> Late-night house</button>
+          <button type="button" data-prompt="A broken-beat jazz sketch led by warm electric piano, upright bass and loose brushed drums."><span class="idea-icon mint" data-icon="note"></span> Broken-beat jazz</button>
+          <button type="button" data-prompt="A sparse cinematic pulse with a slowly evolving synth drone, distant percussion and a bittersweet melody."><span class="idea-icon lilac" data-icon="activity"></span> Cinematic pulse</button>
+        </div>
+        <form id="composer" class="composer">
+          <label for="prompt" class="sr-only">Describe your music</label>
+          <textarea id="prompt" name="prompt" rows="1" maxlength="1000" placeholder="Describe the music you want to hear…" required></textarea>
+          <button class="submit" type="submit"><span>Compose</span><span data-icon="arrow"></span></button>
+        </form>
+        <div class="composer-footer"><a href="https://strudel.cc/">Powered by Strudel ↗</a><span class="keyboard-hint"><kbd>↵</kbd> to compose</span></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="download-dialog" aria-labelledby="download-title">
+    <form id="download-form">
+      <div class="dialog-heading">
+        <div><h2 id="download-title">Download audio</h2><p>16-bit PCM WAV</p></div>
+        <button type="button" class="dialog-close" aria-label="Close download settings" data-icon="close"></button>
+      </div>
+      <label class="export-source">Audio <select name="track"></select></label>
+      <div class="export-settings">
+        <label>Sample rate
+          <select name="rate"><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select>
+        </label>
+        <label>Channels
+          <select name="channels"><option value="2">Stereo</option><option value="1">Mono</option></select>
+        </label>
+      </div>
+      <label>Length <select name="length"></select></label>
+      <p class="download-status" role="status"></p>
+      <button class="submit download-confirm" type="submit"><span data-icon="download"></span> Download WAV</button>
+    </form>
+  </dialog>
+
+  <template id="reply-template">
+    <article class="reply">
+      <div class="reply-brand"><span class="mini-brand" aria-hidden="true" data-icon="activity"></span> <strong>TuneLM</strong></div>
+      <details class="thinking">
+        <summary>
+          <span data-icon="note"></span>
+          <span class="notes-summary"><strong>Composition notes</strong><span class="notes-preview"></span></span>
+          <span data-icon="chevron"></span>
+        </summary>
+        <p></p>
+      </details>
+      <div class="studio">
+        <div class="studio-top">
+          <div>
+            <h2 class="track-title"></h2>
+            <p class="track-meta"></p>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Composition view">
+            <button type="button" role="tab" aria-selected="true" data-tab="music"><span data-icon="wave"></span>Music</button>
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-tab="code"><span data-icon="code"></span>Code</button>
+          </div>
+        </div>
+        <div class="music-panel" role="tabpanel">
+          <div class="timeline" hidden>
+            <div class="timeline-labels"><span>LAYERS</span><div class="ruler" aria-hidden="true"></div></div>
+            <div class="lanes"></div>
+            <div class="timeline-seek" role="slider" tabindex="0" aria-label="Playback position" title="Click or drag to seek"
+              aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+              <div class="playhead" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="transport" hidden>
+            <button class="play-mix" type="button"><span data-icon="play"></span><span>Play mix</span></button>
+            <span class="time">0:00</span>
+            <span class="loop-label" title="Playback loops at the end"><span data-icon="repeat"></span> Loop</span>
+            <button class="download-button" type="button"><span data-icon="download"></span> Download</button>
+          </div>
+          <p class="playback-error" role="alert" hidden></p>
+        </div>
+        <div class="code-panel" role="tabpanel" hidden>
+          <div class="code-bar"><span>Strudel</span><button type="button" class="copy-button"><span data-icon="copy"></span> Copy code</button></div>
+          <pre tabindex="0"><code></code></pre>
+        </div>
+      </div>
+    </article>
+  </template>
+</body>
+</html>

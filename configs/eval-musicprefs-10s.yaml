@@ -1,0 +1,36 @@
+schema_version: 2
+benchmark: datasets/audio-benchmarks/musicprefs-grpo-step400-10s
+tunelm_name: tunelm-grpo-step400
+inference_config: configs/inference-grpo-step400.yaml
+output: results/audio-eval/musicprefs-grpo-step400-10s
+device: cuda
+seconds: 10
+mad_reference: datasets/audio-benchmarks/fma-pop/mad-10s.npz
+embedding_cache: results/audio-eval/embeddings
+match_rendered: true
+batch_size: 16
+render_workers: 4
+attempts: 5
+retry_temperature: 0.4
+experiments:
+  - name: audioldm2
+    audio_dir: datasets/audio-benchmarks/musicprefs-10s/audio/audioldm2
+  - name: musicgen_large
+    audio_dir: datasets/audio-benchmarks/musicprefs-10s/audio/musicgen_large
+  - name: musicgen_medium
+    audio_dir: datasets/audio-benchmarks/musicprefs-10s/audio/musicgen_medium
+  - name: musicgen_small
+    audio_dir: datasets/audio-benchmarks/musicprefs-10s/audio/musicgen_small
+  - name: musicldm
+    audio_dir: datasets/audio-benchmarks/musicprefs-10s/audio/musicldm
+  - name: stable_audio_open
+    audio_dir: datasets/audio-benchmarks/musicprefs-10s/audio/stable_audio_open
+  - name: gemini-argon
+    audio_dir: datasets/audio-benchmarks/musicprefs/audio/gemini-argon
+  - name: tunelm-sft-song-describer-20261115-1151
+    audio_dir: datasets/audio-benchmarks/musicprefs/audio/tunelm-sft-song-describer-20261115-1151
+  - name: tunelm-grpo-step150
+    audio_dir: datasets/audio-benchmarks/musicprefs-grpo-step150-10s/audio/tunelm-grpo-step150
+  - name: tunelm-grpo-step250
+    audio_dir: datasets/audio-benchmarks/musicprefs-grpo-step250-10s/audio/tunelm-grpo-step250
+  - tunelm-grpo-step400
