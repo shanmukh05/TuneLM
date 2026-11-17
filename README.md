@@ -1,76 +1,53 @@
 # TuneLM
 
-TuneLM generates executable [Strudel](https://strudel.cc/) music using compositional
-memory and [`LiquidAI/LFM3-1.7B-Base`](https://huggingface.co/LiquidAI/LFM3-1.7B-Base).
-Runtime settings live in YAML under `configs/`; datasets remain plain JSONL.
-The implementation includes pinned licensed-source collection, ingestion, AST stem extraction,
-headless verification, independent prompt authoring, optional musical references, original composition with OpenAI,
-Gemini, Claude, DeepSeek, or OpenRouter, **SFT and GRPO RL**, inference, and
-symbolic and audio evaluation.
+TuneLM generates executable [Strudel](https://strudel.cc/) code from music descriptions.
+The browser runs the code to produce audio.
 
-**Status (2026-11-15): Song Describer SFT checkpoint available.** Its model
-and revision are configured in [`configs/inference.yaml`](configs/inference.yaml).
-The MusicPrefs benchmark imports reference generator outputs and fills missing
-TuneLM WAVs on demand. See the [evaluation configuration](configs/eval-musicprefs-sft.yaml)
-and [MusicPrefs setup](docs/audio-evaluation.md).
+[Try TuneLM](https://www.tensorwrites.com/tunelm) · [Documentation](docs/README.md)
 
-The optional reference corpus has **516 compositions and 662 verified stems**.
-It is reference material, not a mandatory composition factory. Registry entries
-and retrieved examples explain musical behavior; unspecified choices belong to
-the composer. Author SFT inputs with `configs/prompts-sft.yaml`, inspect them, then
-compose with `configs/samples-sft.yaml`. RL inputs come from
-`configs/prompts-rl.yaml` and `tunelm export-rl`. A smaller run lowers `counts`
-there, or sets `count` on generation.
-The 19-source allowlist includes MIT, CC0, GPL, and AGPL scopes; source downloads
-are temporary. See [source research](docs/source-research.md) for per-source results.
+## Use the web app
 
-| Document | Contents |
-| --- | --- |
-| [Usage](docs/usage.md) | Setup, corpus, generation, SFT/GRPO, inference, future Vast.ai run |
-| [Implementation](docs/implementation.md) | Actual architecture, limits, and design choices |
-| [MusicPrefs audio evaluation](docs/audio-evaluation.md) | Saved audio, automatic TuneLM rendering, and four metrics |
-| [Training I/O](docs/training-io.md) | JSON/JSONL, model contract, masking, and reward records |
-| [Verification](docs/verification.md) | Checks performed and what remains unrun |
-| [Data layout](datasets/README.md) | Canonical data and derived artifacts |
-| [Original plan](design_docs/implementation-plan.md) | Requirements, source proposals, and implementation sequence |
+1. Enter a music description.
+2. Open **Composition notes** to read the model's notes.
+3. Select **Code** to inspect or copy the Strudel program.
+4. Select **Music** to play the full mix or an individual layer.
+5. Select **Download** to save the audio as a WAV file.
 
-## Local start
+Send a follow-up message to revise the composition. The app compiles the code and renders the full mix before it shows a result. If validation fails, the app can request up to two repairs.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[train,memory,teacher,dev]'
+## How we trained the model
+
+1. **Dataset creation.** We used Gemini 4 Argon and Carbon to create pairs of music descriptions and Strudel programs. The verifier checked the programs before training.
+2. **Supervised fine-tuning (SFT).** We used low-rank adaptation (LoRA) to teach [LFM3-1.7B](https://huggingface.co/LiquidAI/LFM3-1.7B-Base) to write Strudel programs from music descriptions.
+3. **Reinforcement learning.** We used Group Relative Policy Optimization (GRPO). The reward function scored programs on execution and how well they met the musical constraints.
+
+The [inference configuration](configs/inference.yaml) selects the [GRPO step 250 checkpoint](https://huggingface.co/tensorfiend/tunelm-v2-lfm3-1.7B-grpo-step250). The checkpoint requires Hugging Face access.
+
+## Run the web app locally
+
+Use Node.js 22 or later. Run these commands from the repository root.
+
+```sh
 npm ci
-tunelm verify examples/groove.js --cycles 32
-python scripts/collect_seeds.py --config configs/registry/sources.yaml --ingest
-tunelm build-memory --lexical
+npm run dev:web
 ```
 
-Use `tunelm build-memory` for the configured semantic model instead of the explicit
-offline lexical baseline. Planning uses the pinned LFM tokenizer. Teacher calls
-and model execution require separate commands; see usage before launching them.
-Preview input authoring without paid calls using
-`tunelm create-prompts --dry-run`.
-The complete two-stage run commands are in [Usage](docs/usage.md).
+Open [the local app](http://127.0.0.1:4173/tunelm). Play the example on the **Overview** tab to check audio playback.
 
-Required training order:
+Vercel hosts the live web app. Modal hosts the [inference service](scripts/modal_inference.py).
+For live composition from the local app, connect to a deployed Modal service. For an HTTP connection, set these variables in `.env.local`.
 
-```bash
-tunelm train-sft --config configs/sft.yaml
-tunelm train-grpo --config configs/grpo.yaml
-```
+| Variable | Value |
+| --- | --- |
+| `TUNELM_MODAL_URL` | Base URL of the Modal `web` function |
+| `TUNELM_MODAL_KEY` | Modal proxy token ID |
+| `TUNELM_MODAL_SECRET` | Modal proxy token secret |
 
-These require reviewed teacher-generated data and a CUDA host. Add `--dry-run
---tokenize` to validate prerequisites without loading weights.
-`examples/seeds.jsonl` keeps the ten original starter inputs;
-the larger accepted collection is in `datasets/sources/compositions.jsonl` after
-running the collector. Its small held-out set is not a production quality benchmark.
+## Project guides
 
-New data uses `datasets/`, run outputs use `results/`, and adapters use
-`checkpoints/`. Legacy datasets, checkpoints, and results remain intact under
-ignored `contents_v1/`; see its [original dataset card](contents_v1/datasets/README.md).
-Code never writes into that archive. `.cursor/` guidance and local credentials
-remain in place. No unit tests were created; verification uses real inputs and
-manual smoke runs. Candidate-code execution needs an OS sandbox for hostile input.
+- [Usage](docs/usage.md) covers data preparation, training commands, and inference.
+- [Training records](docs/training-io.md) describes the data and model response formats.
+- [GRPO rewards](docs/rl-reward-design.md) explains the execution checks and musical scores.
+- [MusicPrefs evaluation](docs/audio-evaluation.md) explains how to compare rendered audio.
 
-License: AGPL-3.0-or-later. Model and source-corpus licenses remain separate.
+The code uses the [AGPL-3.0-or-later license](LICENSE).
