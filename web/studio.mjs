@@ -1,6 +1,9 @@
 import './studio.css';
+import MarkdownIt from 'markdown-it';
 import { makeWav, maxExportSeconds, play, prepareMix, previewAudio, seek, stop, UnplayablePatternError, warmPlayback } from './player.mjs';
 import { musicFacts } from './music-facts.mjs';
+
+const notesMarkdown = new MarkdownIt({ html: false, breaks: true }).disable('image');
 
 const icons = {
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -530,9 +533,10 @@ function showReply(turn, { thinking, code, score, clip }, title) {
   installIcons(reply);
   reply.querySelector('.track-title').textContent = title;
   reply.querySelector('.thinking').hidden = !thinking;
-  reply.querySelector('.thinking p').textContent = thinking;
-  reply.querySelector('.notes-preview').textContent = thinking;
-  reply.querySelector('.notes-preview').setAttribute('aria-hidden', 'true');
+  const notes = reply.querySelector('.notes-body');
+  notes.innerHTML = notesMarkdown.render(thinking);
+  const preview = notes.querySelector('p, li') ?? notes.firstElementChild;
+  reply.querySelector('.notes-preview').textContent = preview?.textContent.trim() ?? '';
   const codeBlock = reply.querySelector('.code-panel code');
   highlight(codeBlock, code);
   const copy = reply.querySelector('.copy-button');
@@ -570,7 +574,7 @@ function showPending(turn) {
     bar.style.setProperty('--bar', i);
     wave.append(bar);
   }
-  const stage = document.createTextNode('Composing your music…');
+  const stage = document.createTextNode('Composing your music… This may take a few minutes.');
   status.append(wave, stage);
   const text = element('a', 'fact-copy');
   text.target = '_blank';

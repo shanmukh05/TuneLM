@@ -44,7 +44,7 @@
         </div>
         <figure class="overview-example">
           <figcaption class="code-bar">
-            <span>UK garage · 136 BPM</span>
+            <span>UK garage</span>
             <button class="example-play" type="button" hidden><span data-icon="play"></span><span>Play code</span></button>
           </figcaption>
           <pre tabindex="0" aria-label="Strudel code for the UK garage example"><code>setcpm(136 / 4)
@@ -119,7 +119,7 @@ arrange(
             <div class="workflow-art" aria-hidden="true"></div>
             <div class="workflow-copy">
               <h3>Supervised fine-tuning (SFT)</h3>
-              <p>Fine-tune LFM3-1.7B with LoRA on those pairs so it learns to write Strudel code from music descriptions.</p>
+              <p>Fine-tune LiquidAI's LFM3-1.7B model with LoRA on those pairs so it learns to write Strudel code from music descriptions.</p>
             </div>
           </li>
           <li>
@@ -145,7 +145,7 @@ arrange(
         <div class="ideas" aria-label="Example prompts">
           <button type="button" data-prompt="A mellow late-night house groove with a warm bassline, dusty drums and soft keys."><span class="idea-icon dusk" data-icon="moon"></span> Late-night house</button>
           <button type="button" data-prompt="A broken-beat jazz sketch led by warm electric piano, upright bass and loose brushed drums."><span class="idea-icon mint" data-icon="note"></span> Broken-beat jazz</button>
-          <button type="button" data-prompt="A sparse cinematic pulse with a slowly evolving synth drone, distant percussion and a bittersweet melody."><span class="idea-icon lilac" data-icon="activity"></span> Cinematic pulse</button>
+          <button type="button" data-prompt="A bouncy 8-bit arcade loop at 120 BPM with a square-wave arpeggio and a triangle-wave bassline. Use only Strudel’s built-in square and triangle synth sounds."><span class="idea-icon lilac" data-icon="activity"></span> 8-bit arcade</button>
         </div>
         <form id="composer" class="composer">
           <label for="prompt" class="sr-only">Describe your music</label>
@@ -184,10 +184,10 @@ arrange(
       <details class="thinking">
         <summary>
           <span data-icon="note"></span>
-          <span class="notes-summary"><strong>Composition notes</strong><span class="notes-preview"></span></span>
+          <span class="notes-summary"><strong>Composition notes</strong><span class="notes-preview" aria-hidden="true"></span></span>
           <span data-icon="chevron"></span>
         </summary>
-        <p></p>
+        <div class="notes-body"></div>
       </details>
       <div class="studio">
         <div class="studio-top">

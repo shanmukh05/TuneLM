@@ -248,7 +248,17 @@ code { font: inherit; }
 .thinking summary strong { line-height: 15px; }
 .thinking summary > [data-icon]:last-child { margin-left: auto; }
 .thinking[open] summary > [data-icon]:last-child .icon { transform: rotate(180deg); }
-.thinking p { margin: 0; padding: 0 12px 11px; color: var(--muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notes-body { padding: 0 12px 11px; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.notes-body > * { margin: 0; }
+.notes-body > * + * { margin-top: .65em; }
+.notes-body :is(h1, h2, h3, h4, h5, h6) { color: var(--ink); font-size: 1em; line-height: 1.4; }
+.notes-body :is(ul, ol) { padding-inline-start: 1.5em; }
+.notes-body a { color: var(--accent); text-decoration: underline; text-underline-offset: .15em; }
+.notes-body :not(pre) > code { border-radius: 4px; padding: .1em .3em; background: #e9e5d9; font: 400 .92em var(--mono); }
+.notes-body pre { border-radius: 6px; }
+.notes-body blockquote { border-inline-start: 2px solid var(--line); padding-inline-start: .8em; }
+.notes-body table { display: block; overflow-x: auto; border-collapse: collapse; }
+.notes-body :is(th, td) { border: 1px solid var(--line); padding: .15em .5em; }
 
 .composer-wrap { position: sticky; z-index: 2; bottom: 0; margin-top: auto; padding-top: 15px; padding-bottom: 14px; background: linear-gradient(transparent, var(--paper) 11px); }
 .composer { display: flex; gap: 10px; align-items: flex-end; padding: 6px; border: 1px solid #d8d2c6; border-radius: 11px; background: var(--panel); box-shadow: 0 3px 12px #423a2910; }
@@ -367,10 +377,17 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
   .composer-wrap { padding-top: 15px; padding-bottom: max(9px, env(safe-area-inset-bottom)); }
   .keyboard-hint { display: none; }
   .composer textarea { font-size: 16px; }
+  .composer textarea::placeholder { font-size: clamp(10px, 2.95vw, 13px); }
   .ideas { gap: 4px; }
   .ideas button { font-size: 10px; padding-inline: 3px 5px; }
   .composer-footer { padding-top: 5px; }
   .loop-label { display: none; }
+}
+@media (max-width: 360px) {
+  .composer { gap: 6px; }
+  .composer textarea { padding-inline: 6px 2px; }
+  .composer .submit { padding-inline: 9px; }
+  .composer .submit .icon { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .loading-wave i { animation: none; transform: scaleY(.48); }
