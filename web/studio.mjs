@@ -576,30 +576,45 @@ function showPending(turn) {
   }
   const stage = document.createTextNode('Composing your music… This may take a few minutes.');
   status.append(wave, stage);
-  const text = element('a', 'fact-copy');
-  text.target = '_blank';
-  text.rel = 'noreferrer';
-  content.append(status, text);
-  const art = element('div', 'fact-art');
-  art.setAttribute('aria-hidden', 'true');
-  pending.append(content, art);
-  message.append(pending);
-  const rotate = () => {
-    if (pending.contains(document.activeElement)) return;
-    const { copy, source, paper, mark, sheet, size, position } = musicFacts[nextFact++ % musicFacts.length];
-    text.textContent = copy;
+  const copies = element('div', 'fact-copies');
+  const frame = element('div', 'fact-frame');
+  frame.setAttribute('aria-hidden', 'true');
+  const slides = musicFacts.map(({ copy, source, sheet, size, position, paper, mark }) => {
+    const text = element('a', 'fact-copy', copy);
     text.href = source;
-    pending.style.setProperty('--fact-paper', paper);
-    pending.style.setProperty('--fact-mark', mark);
-    art.style.backgroundImage = `url("${sheet}")`;
+    text.target = '_blank';
+    text.rel = 'noreferrer';
+    text.inert = true;
+    const art = element('div', 'fact-art');
     art.style.backgroundSize = size;
     art.style.backgroundPosition = position;
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      text.animate([{ opacity: 0, transform: 'translateY(5px)' }, { opacity: 1, transform: 'none' }], 350);
-      art.animate([{ opacity: 0.25 }, { opacity: 1 }], 500);
+    copies.append(text);
+    frame.append(art);
+    return { text, art, sheet, paper, mark };
+  });
+  content.append(status, copies);
+  pending.append(content, frame);
+  let current;
+  const rotate = () => {
+    if (pending.contains(document.activeElement)) return;
+    if (current) {
+      current.text.inert = true;
+      current.text.classList.remove('is-current');
+      current.art.classList.remove('is-current');
     }
+    current = slides[nextFact++ % slides.length];
+    const { text, art, sheet, paper, mark } = current;
+    text.inert = false;
+    text.classList.add('is-current');
+    art.classList.add('is-current');
+    art.style.backgroundImage = `url("${sheet}")`;
+    pending.style.setProperty('--fact-paper', paper);
+    pending.style.setProperty('--fact-mark', mark);
+    const upcoming = slides[nextFact % slides.length];
+    upcoming.art.style.backgroundImage = `url("${upcoming.sheet}")`;
   };
   rotate();
+  message.append(pending);
   const interval = setInterval(rotate, 8500);
   return {
     setStage: label => { stage.textContent = label; },

@@ -276,7 +276,7 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
   --fact-mark: #8a4632;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(155px, 31%);
+  grid-template-columns: minmax(0, 1fr) clamp(155px, 31%, 220px);
   align-items: center;
   gap: 18px;
   min-height: 264px;
@@ -286,6 +286,7 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--fact-paper);
+  transition: background-color 550ms ease;
 }
 .pending-copy { align-self: stretch; display: flex; flex-direction: column; justify-content: center; padding: 10px 4px 17px 19px; }
 .pending-status {
@@ -295,6 +296,7 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
   margin: 0 0 18px;
   color: var(--fact-mark);
   font: 500 11px/1.4 var(--mono);
+  transition: color 550ms ease;
 }
 .loading-wave { width: 40px; height: 26px; display: inline-flex; align-items: center; gap: 3px; flex: none; }
 .loading-wave i {
@@ -311,6 +313,7 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
 }
 .fact-copy {
   display: block;
+  align-self: center;
   max-width: 21ch;
   color: #292820;
   font: 400 clamp(29px, 4.4vw, 42px)/1.06 'Instrument Serif', Georgia, serif;
@@ -318,13 +321,22 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
   text-underline-offset: .12em;
 }
 .fact-copy:hover { text-decoration: underline; text-decoration-thickness: 1px; }
-.fact-art {
-  width: 100%;
+.fact-copies, .fact-frame { display: grid; }
+/* All the text shares one grid cell, which takes the height of the longest fact. */
+.fact-copy, .fact-art {
+  grid-area: 1 / 1;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 400ms ease, transform 400ms ease, visibility 0s 400ms;
+}
+.fact-copy { transform: translateY(7px); }
+.fact-frame {
   aspect-ratio: 1;
   border-radius: 9px;
-  background-color: var(--fact-mark);
-  background-size: 200% 200%;
+  overflow: hidden;
 }
+.fact-art { transition-duration: 550ms, 550ms, 0s; transition-delay: 0s, 0s, 550ms; }
+:is(.fact-copy, .fact-art).is-current { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
 .error-box { margin: 0; padding: 12px 14px; border: 1px solid #e7cbbd; border-radius: 9px; color: #863e2b; background: #faf0eb; font-size: 13px; }
 
 @media (max-width: 880px) {
@@ -367,7 +379,7 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
   .lane-label { font-size: 10px; gap: 5px; padding-left: 7px; }
   .lane-play { width: 24px; height: 24px; }
   .ruler span:nth-last-child(2):not(:first-child) { display: none; }
-  .pending-card { grid-template-columns: minmax(0, 1fr) minmax(92px, 32%); gap: 10px; min-height: 230px; }
+  .pending-card { grid-template-columns: minmax(0, 1fr) clamp(76px, 30%, 180px); gap: 10px; min-height: 230px; }
   .pending-copy { padding: 5px 0 8px 3px; }
   .pending-status { margin-bottom: 10px; gap: 5px; font-size: 10px; }
   .loading-wave { width: 28px; gap: 2px; }
@@ -391,4 +403,5 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
 }
 @media (prefers-reduced-motion: reduce) {
   .loading-wave i { animation: none; transform: scaleY(.48); }
+  .pending-card, .pending-status, .fact-copy, .fact-art { transition: none; }
 }
