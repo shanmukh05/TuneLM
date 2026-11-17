@@ -28,7 +28,6 @@
         <nav class="links" aria-label="Project links">
           <a href="https://www.tensorwrites.com/">Blog <span aria-hidden="true">↗</span></a>
           <a href="https://github.com/shanmukh05/TuneLM">Repo <span aria-hidden="true">↗</span></a>
-          <a href="https://www.tensorwrites.com/about">Website <span aria-hidden="true">↗</span></a>
         </nav>
         <button id="new-session" class="new-session" type="button" title="New chat" hidden><span data-icon="plus"></span><span>New chat</span></button>
       </div>
@@ -107,27 +106,27 @@ arrange(
       </div>
 
       <section class="workflow" aria-labelledby="workflow-title">
-        <h2 id="workflow-title">How TuneLM learns</h2>
+        <h2 id="workflow-title">How is TuneLM trained?</h2>
         <ol class="workflow-steps" role="list">
           <li>
             <div class="workflow-art" aria-hidden="true"></div>
             <div class="workflow-copy">
-              <h3>Build the dataset</h3>
-              <p>Start with licensed Strudel examples. Build pairs of music descriptions and Strudel programs, then check that the code runs.</p>
+              <h3>Dataset creation</h3>
+              <p>Use Gemini 4 Argon and Carbon to create synthetic pairs of music descriptions and Strudel programs.</p>
             </div>
           </li>
           <li>
             <div class="workflow-art" aria-hidden="true"></div>
             <div class="workflow-copy">
-              <h3>Supervised fine-tuning</h3>
-              <p>Fine-tune LFM3 on those pairs so it learns to translate music requests into code for notes, rhythms, and instruments.</p>
+              <h3>Supervised fine-tuning (SFT)</h3>
+              <p>Fine-tune LFM3-1.7B with LoRA on those pairs so it learns to write Strudel code from music descriptions.</p>
             </div>
           </li>
           <li>
             <div class="workflow-art" aria-hidden="true"></div>
             <div class="workflow-copy">
               <h3>Reinforcement learning (GRPO)</h3>
-              <p>Compare several candidate programs for each prompt. Use their relative scores to reward code that runs and meets the musical constraints.</p>
+              <p>Train with GRPO using a reward function that scores how well runnable Strudel programs meet the prompt’s musical constraints.</p>
             </div>
           </li>
         </ol>

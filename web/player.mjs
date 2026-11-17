@@ -2,6 +2,7 @@ import * as audio from 'superdough';
 import { finishReverbs } from 'superdough/reverbGen.mjs';
 import { getFontBufferSource, registerSoundfonts, setSoundfontUrl } from '@strudel/soundfonts/fontloader.mjs';
 import gm from '@strudel/soundfonts/gm.mjs';
+import { fetchAudioAsset } from './audio-assets.mjs';
 
 const raw = 'https://raw.githubusercontent.com/';
 const dough = `${raw}felixroos/dough-samples/9eacfc86ec4393e68a463ff52b01c19cfaa77f38/`;
@@ -22,14 +23,20 @@ let active;
 
 export class UnplayablePatternError extends Error {}
 
-function loadMap(url, base) {
+function assetError(label, error) {
+  return new UnplayablePatternError(
+    `Could not load ${label}. ${error.message} Use built-in sounds such as sine, triangle, or sbd if samples are unavailable.`,
+    { cause: error },
+  );
+}
+
+function loadMap(url, base, label) {
   if (!maps.has(url)) {
-    maps.set(url, fetch(url, { signal: AbortSignal.timeout(15000) }).then(async response => {
-      if (!response.ok) throw new Error('Strudel’s sample library could not be loaded.');
+    maps.set(url, fetchAudioAsset(url).then(async response => {
       await audio.samples(await response.json(), base);
     }).catch(error => {
       maps.delete(url);
-      throw error;
+      throw assetError(label, error);
     }));
   }
   return maps.get(url);
@@ -43,9 +50,9 @@ async function loadSounds(events, context) {
   const names = new Set(events.map(event => soundName(event.value)));
   const missing = [...names].filter(name => !audio.getSound(name));
   await Promise.all([
-    missing.includes('piano') && loadMap(`${dough}piano.json`, `${dough}piano/`),
-    missing.some(name => name !== 'piano' && !name.includes('_')) && loadMap(`${uzu}strudel.json`, uzu),
-    missing.some(name => name.includes('_')) && loadMap(`${dough}tidal-drum-machines.json`, drums),
+    missing.includes('piano') && loadMap(`${dough}piano.json`, `${dough}piano/`, 'the Strudel piano library'),
+    missing.some(name => name !== 'piano' && !name.includes('_')) && loadMap(`${uzu}strudel.json`, uzu, 'the Strudel sample library'),
+    missing.some(name => name.includes('_')) && loadMap(`${dough}tidal-drum-machines.json`, drums, 'the Strudel drum machine library'),
   ]);
 
   const warm = new Map();
@@ -58,16 +65,38 @@ async function loadSounds(events, context) {
       const index = ((Math.round(Number(value.n) || 0) % bank.length) + bank.length) % bank.length;
       const preset = bank[index];
       const key = `${preset}:${value.freq ?? ''}:${value.note ?? ''}`;
-      if (!warm.has(key)) warm.set(key, () => getFontBufferSource(preset, value, context));
+      if (!warm.has(key)) warm.set(key, { name, load: () => getFontBufferSource(preset, value, context) });
     } else if (sound.data?.samples) {
       const controls = { ...value, s: name };
       const key = audio.getSampleInfo(controls, sound.data.samples).url;
-      if (!warm.has(key)) warm.set(key, () => audio.getSampleBuffer(controls, sound.data.samples));
+      if (!warm.has(key)) warm.set(key, { name, load: () => audio.getSampleBuffer(controls, sound.data.samples) });
     }
   }
   const jobs = [...warm.values()];
   for (let i = 0; i < jobs.length; i += 12) {
-    await Promise.all(jobs.slice(i, i + 12).map(load => load()));
+    await Promise.all(jobs.slice(i, i + 12).map(async ({ name, load }) => {
+      try {
+        await load();
+      } catch (error) {
+        throw assetError(`the Strudel sound “${name}”`, error);
+      }
+    }));
+  }
+}
+
+async function loadWorklet(context) {
+  let timeout;
+  try {
+    await Promise.race([
+      context.audioWorklet.addModule(new URL('./audio-worklets.js', import.meta.url)),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('The audio worklet took too long to load.')), 15000);
+      }),
+    ]);
+  } catch (error) {
+    throw new Error('The browser audio engine could not load. Reload the page and try again.', { cause: error });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -130,16 +159,10 @@ function renderAudio(score, events, rate, seconds, urgent = false) {
       context[method] = AudioContext.prototype[method];
     }
     const selected = events.filter(event => event.start / cps < seconds);
-    let timeout;
     audio.setRenderingContext(context);
     try {
-      await Promise.race([
-        Promise.all([context.audioWorklet.addModule(new URL('./audio-worklets.js', import.meta.url)), loadSounds(selected, context)]),
-        new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error('Audio assets took too long to load.')), 30000);
-        }),
-      ]);
-      clearTimeout(timeout);
+      await loadWorklet(context);
+      await loadSounds(selected, context);
       audio.setMaxPolyphony(Math.max(selected.length, 1));
       for (const [index, event] of selected.entries()) {
         const value = { ...event.value };
@@ -158,7 +181,6 @@ function renderAudio(score, events, rate, seconds, urgent = false) {
       const peak = leaveHeadroom(buffer);
       return { buffer, padding, frames, rate, peak };
     } finally {
-      clearTimeout(timeout);
       await finishReverbs().catch(() => {});
       audio.releaseAudioGraph();
       audio.setRenderingContext(undefined);

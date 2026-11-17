@@ -21,7 +21,7 @@ export function offlineAudio(root) {
         contents: "export default new URL('./audio-worklets.js', import.meta.url).href;",
       }));
       build.onLoad({
-        filter: /[/\\]superdough[/\\](audioContext|superdough|superdoughoutput|reverbGen)\.mjs$/,
+        filter: /[/\\]superdough[/\\](audioContext|superdough|superdoughoutput|reverbGen|sampler)\.mjs$/,
       }, async ({ path }) => {
         const source = await readFile(path, 'utf8');
         switch (basename(path)) {
@@ -39,6 +39,13 @@ export function offlineAudio(root) {
             return { contents: replace(source,
               '    this.audioContext.destination.channelCount = maxChannelCount;',
               '    if (!(audioContext instanceof OfflineAudioContext)) audioContext.destination.channelCount = maxChannelCount;') };
+          case 'sampler.mjs':
+            return {
+              contents: `import { fetchAudioAsset } from ${JSON.stringify(resolve(root, 'web/audio-assets.mjs'))};\n` +
+                replace(replace(source, 'loadCache[url] = fetch(url)', 'loadCache[url] = fetchAudioAsset(url)'),
+                  '        return decoded;\n      });',
+                  '        return decoded;\n      }).catch(error => { delete loadCache[url]; throw error; });'),
+            };
           case 'reverbGen.mjs':
             return { contents: replace(source, `  context.oncomplete = function (event) {
     callback(event.renderedBuffer);

@@ -1,5 +1,7 @@
 import { parse } from 'acorn';
 
+const decodedZones = new WeakMap();
+
 function read(node) {
   switch (node.type) {
     case 'Literal':
@@ -45,4 +47,29 @@ export function nearestZone(zones, pitch) {
     }
   }
   return best;
+}
+
+async function decodeZone(zone, context) {
+  if (zone.file) {
+    const bytes = Uint8Array.from(atob(zone.file), character => character.charCodeAt(0));
+    return context.decodeAudioData(bytes.buffer);
+  }
+  if (!zone.sample) throw new Error('The soundfont zone contains no audio.');
+
+  const bytes = Uint8Array.from(atob(zone.sample), character => character.charCodeAt(0));
+  const pcm = new DataView(bytes.buffer);
+  const buffer = context.createBuffer(1, Math.floor(bytes.length / 2), zone.sampleRate);
+  const samples = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) samples[i] = pcm.getInt16(2 * i, true) / 32768;
+  return buffer;
+}
+
+export function decodeSoundfontZone(zone, context) {
+  if (!decodedZones.has(zone)) {
+    decodedZones.set(zone, decodeZone(zone, context).catch(error => {
+      decodedZones.delete(zone);
+      throw error;
+    }));
+  }
+  return decodedZones.get(zone);
 }

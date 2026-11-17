@@ -35,14 +35,23 @@ await Promise.all([
           const findZone = `return preset.find((zone) => {
     return zone.keyRangeLow <= pitch && zone.keyRangeHigh + 1 >= pitch;
   });`;
-          if (!source.includes(upstream) || !source.includes(findZone)) {
-            throw new Error('Review the updated Strudel soundfont loader.');
+          const changes = [
+            [upstream, 'return readSoundfont(preset);'],
+            [findZone, 'return nearestZone(preset, pitch);'],
+            ['await fetch(url).then((res) => res.text())', 'await (await fetchAudioAsset(url)).text()'],
+            ['loadCache[name] = load();', 'loadCache[name] = load().catch(error => { delete loadCache[name]; throw error; });'],
+            ['bufferCache[key] = load();', 'bufferCache[key] = load().catch(error => { delete bufferCache[key]; throw error; });'],
+            ['await getBuffer(zone, ac)', 'await decodeSoundfontZone(zone, ac)'],
+            ["from '@strudel/webaudio'", "from 'superdough'"],
+          ];
+          let patched = source;
+          for (const [original, replacement] of changes) {
+            if (!patched.includes(original)) throw new Error('Review the updated Strudel soundfont loader.');
+            patched = patched.replace(original, replacement);
           }
           return {
-            contents: `import { readSoundfont, nearestZone } from ${JSON.stringify(resolve(root, 'web/soundfont-data.mjs'))};\n` +
-              source.replace(upstream, 'return readSoundfont(preset);')
-                .replace(findZone, 'return nearestZone(preset, pitch);')
-                .replace("from '@strudel/webaudio'", "from 'superdough'"),
+            contents: `import { decodeSoundfontZone, readSoundfont, nearestZone } from ${JSON.stringify(resolve(root, 'web/soundfont-data.mjs'))};\n` +
+              `import { fetchAudioAsset } from ${JSON.stringify(resolve(root, 'web/audio-assets.mjs'))};\n` + patched,
           };
         });
       },

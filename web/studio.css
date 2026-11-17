@@ -34,7 +34,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, pre:focus-visible,
 
 .masthead { position: sticky; top: 0; z-index: 5; border-bottom: 1px solid var(--line); background: #fcfbf7; }
 .masthead-inner {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center;
+  display: grid; grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr); align-items: center;
   gap: 12px; max-width: 1200px; height: calc(var(--masthead-height) - 1px);
   margin: auto; padding: 0 30px;
 }
@@ -317,11 +317,14 @@ kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; font:
 }
 .error-box { margin: 0; padding: 12px 14px; border: 1px solid #e7cbbd; border-radius: 9px; color: #863e2b; background: #faf0eb; font-size: 13px; }
 
-@media (max-width: 760px) {
+@media (max-width: 880px) {
   :root { --masthead-height: 94px; }
   .masthead-inner { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 45px 40px; gap: 0 8px; padding: 4px 16px; }
-  .header-actions { grid-column: 2; grid-row: 1; gap: 8px; }
+  .header-actions { grid-column: 2; grid-row: 1; }
   .page-tabs { grid-column: 1 / -1; grid-row: 2; }
+}
+@media (max-width: 760px) {
+  .header-actions { gap: 8px; }
   .brand { gap: 7px; font-size: 20px; }
   .brand-mark { width: 28px; height: 28px; }
   .links { gap: 10px; font-size: 11px; }
