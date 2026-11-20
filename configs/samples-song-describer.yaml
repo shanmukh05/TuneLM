@@ -4,7 +4,7 @@ progress: true
 save_every: 10
 run_id: song-describer-sft-full-02
 prompts_dir: datasets/prompts/song-describer
-dataset_dir: datasets/samples/song-describer
+dataset_dir: datasets/sample_sources/song-describer
 references: optional
 memory_dir: datasets/memory
 context_tokens: 16384

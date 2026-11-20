@@ -15,9 +15,9 @@ hub:
   private: true
   metric: eval_loss
   greater_is_better: false
-train_file: datasets/samples/song-describer/sft/train.jsonl
-val_file: datasets/samples/song-describer/sft/val.jsonl
-benchmark_file: datasets/samples/song-describer/evaluation/benchmark.jsonl
+train_file: datasets/sample_sources/song-describer/sft/train.jsonl
+val_file: datasets/sample_sources/song-describer/sft/val.jsonl
+benchmark_file: datasets/sample_sources/song-describer/evaluation/benchmark.jsonl
 output_dir: checkpoints/lfm3-sft-song-describer
 results_dir: results/lfm3-sft-song-describer
 training:

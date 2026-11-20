@@ -417,8 +417,8 @@ def _record(config, key: str, value) -> None:
 
 
 _BENCHMARK_FILES = {
-    "sft": "datasets/samples/generated/evaluation/benchmark.jsonl",
-    "grpo": "datasets/samples/generated/rl/benchmark.jsonl",
+    "sft": "datasets/samples/sft/benchmark.jsonl",
+    "grpo": "datasets/samples/rl/benchmark.jsonl",
 }
 
 

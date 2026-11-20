@@ -1,5 +1,7 @@
 # TuneLM
 
+[Repo](https://github.com/shanmukh05/TuneLM) · [Dataset](https://huggingface.co/datasets/tensorfiend/code2music) · [Model](https://huggingface.co/tensorfiend/TuneLM-LFM3-1.7B-code2music-2011) · [Try TuneLM](https://www.tensorwrites.com/tunelm) · [Blog](https://www.tensorwrites.com/posts/tunelm)
+
 TuneLM turns a music description into executable [Strudel](https://strudel.cc/) code. Strudel is a JavaScript live-coding environment for music. The browser plays the program. You can edit the source to change the music, run it in Strudel, or export the rendered audio.
 
 This repository contains the web app, the dataset generation pipeline, the optional reference library, the Strudel verifier, and the code for training and evaluating the model.

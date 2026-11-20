@@ -70,7 +70,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p = commands.add_parser("export-rl", help="Write answer-free GRPO tasks from the RL bank")
     p.add_argument("--prompts-dir", default="datasets/prompts/generated")
-    p.add_argument("--dataset-dir", default="datasets/samples/generated")
+    p.add_argument("--dataset-dir", default="datasets/samples")
     p = commands.add_parser("view")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--env-file", default=".env.local")

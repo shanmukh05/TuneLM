@@ -7,8 +7,8 @@ hub:
   private: true
   metric: eval_loss
   greater_is_better: false
-train_file: datasets/samples/generated/sft/train.jsonl
-val_file: datasets/samples/generated/sft/val.jsonl
+train_file: datasets/samples/sft/train.jsonl
+val_file: datasets/samples/sft/val.jsonl
 output_dir: checkpoints/lfm3-sft
 results_dir: results/lfm3-sft
 training:

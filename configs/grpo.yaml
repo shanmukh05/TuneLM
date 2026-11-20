@@ -8,8 +8,8 @@ hub:
   metric: reward
   greater_is_better: true
 # Written by `tunelm export-rl` from datasets/prompts/generated/rl.
-train_file: datasets/samples/generated/rl/train.jsonl
-val_file: datasets/samples/generated/rl/val.jsonl
+train_file: datasets/samples/rl/train.jsonl
+val_file: datasets/samples/rl/val.jsonl
 output_dir: checkpoints/lfm3-grpo
 results_dir: results/lfm3-grpo
 memory_dir: datasets/memory
